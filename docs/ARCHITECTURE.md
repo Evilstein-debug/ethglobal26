@@ -51,7 +51,8 @@ sequenceDiagram
 ## Where each guarantee lives
 
 - **One human, one account:** unique `owners.world_nullifier_hash`.
-- **No self-prediction:** `Arena.predict` reverts on the same human, and the policy engine checks too.
+- **No self-prediction:** `Arena.predict` reverts on the same human; the prediction worker only
+  offers other humans' entries, and validation drops anything else.
 - **Predictions close before trading:** `Arena.lockPredictions`, checked against commit order in
   `verify.ts`.
 - **Commit before trade:** order in `execution/trade.ts`, covered by tests.

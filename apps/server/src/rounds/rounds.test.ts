@@ -76,6 +76,22 @@ async function arena() {
   return { ...w, bob, alice, alpha, beta, at: (t: number) => (clock = EPOCH * 100_000 + t) }
 }
 
+/** The public entry bundle, exactly as a verifier gets it. */
+async function bundleOf(w: Awaited<ReturnType<typeof arena>>, entryId: number) {
+  const server = createApp(w.ctx).listen(0)
+  after(() => server.close())
+  const { port } = server.address() as AddressInfo
+  const res = await fetch(`http://127.0.0.1:${port}/api/entries/${entryId}`)
+  return (await res.json()) as EntryBundle
+}
+
+async function verifiedOk(w: Awaited<ReturnType<typeof arena>>, entryId: number) {
+  const report = await verifyEntry(await bundleOf(w, entryId), w.publicClient, {
+    chainId: w.ctx.chain.id,
+  })
+  assert.ok(report.ok, JSON.stringify(report.steps.filter((s) => s.status === 'fail')))
+}
+
 describe('rounds on anvil', { skip: skipReason }, () => {
   test('full round → YES → Brier → epoch published → owner claims', async () => {
     const w = await arena()
@@ -177,11 +193,7 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     w.at(3000)
     await tick(w.ctx, cfg)
 
-    const server = createApp(w.ctx).listen(0)
-    after(() => server.close())
-    const { port } = server.address() as AddressInfo
-    const res = await fetch(`http://127.0.0.1:${port}/api/entries/1`)
-    const bundle = (await res.json()) as EntryBundle
+    const bundle = await bundleOf(w, 1)
     const verify = async (mutate: (b: EntryBundle) => void = () => undefined) => {
       const copy = structuredClone(bundle)
       mutate(copy)
@@ -265,6 +277,7 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     // Two trade decisions were asked (start + mid-phase), both held.
     const trades = (await w.db.select().from(schema.decisions)).filter((d) => d.kind === 'trade')
     assert.equal(trades.length, 2)
+    await verifiedOk(w, entry!.id)
   })
 
   test('changing the policy mid-round voids the entry', async () => {
@@ -281,6 +294,7 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     // The position was still closed before resolution.
     const [intent] = await w.db.select().from(schema.intents)
     assert.equal(intent!.state, 'CLOSED')
+    await verifiedOk(w, entry!.id)
   })
 
   test('a losing trade resolves NO and earns no trader award', async () => {
@@ -295,6 +309,7 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     const [entry] = await w.db.select().from(schema.roundEntries)
     assert.equal(entry!.outcome, 'NO')
     assert.ok(entry!.pnlBps! < 0)
+    await verifiedOk(w, entry!.id)
     w.at(EPOCH)
     await tick(w.ctx, cfg)
     const awards = await w.db.select().from(schema.rewardAwards)

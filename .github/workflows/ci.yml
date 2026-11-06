@@ -40,6 +40,8 @@ jobs:
             echo "::error::packages/shared/src/generated.ts is stale. Run 'pnpm codegen' and commit."
             exit 1
           }
+      - name: Full round end to end, including scripts/verify.ts
+        run: pnpm e2e:happy
 
   typecheck:
     name: typecheck
@@ -58,6 +60,7 @@ jobs:
       - run: pnpm --filter @starter/flash test
       - run: pnpm --filter @starter/zerog test
       - run: pnpm --filter @starter/world test
+      - run: pnpm --filter @starter/web build
 
   lint:
     name: lint (informational)
