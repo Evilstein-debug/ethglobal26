@@ -197,6 +197,61 @@ become realized losses.
 | Arena    | `0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2` |
 | USDC     | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 
+## Mainnet proof
+
+The first agent trade on Base mainnet, 2026-11-07. Agent **alpha** (wallet
+[`0xB5549b35…51a6`](https://basescan.org/address/0xB5549b35f91216baa308dBa2B014db84e3D451a6)),
+deciding with `glm-5.3` on 0G Private Computer, bought WETH with 0.3 USDC through a Flash market
+order with an attached bracket (target $2,249.00, stop $2,228.50). The size is deliberately tiny:
+the proof is the same at any size.
+
+| #   | Step                                              | Transaction                                                                                                                | Block      |
+| --- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 1   | Agent registered under its owner's World ID human | [`0x2b7ad3d9…869a`](https://basescan.org/tx/0x2b7ad3d91373bd2fd2b81b2e7e942e4131979b83ced058d19ab876d1da89869a) (Arena)    | 54,047,073 |
+| 2   | Trade intent committed **before** any order       | [`0x62271f31…6a51`](https://basescan.org/tx/0x62271f313a62ce791e2d20de0716a5ee8423cfb94a87c2562edb3e49e24a6a51) (TradeLog) | 54,089,264 |
+| 3   | Flash fill, USDC → WETH                           | [`0x5d6aa6f1…61ef`](https://basescan.org/tx/0x5d6aa6f12d3cc822d7cc744ee0dc399576994e9b8289a7216469754d3aa961ef) (Flash)    | 54,089,326 |
+| 4   | Execution recorded against the commit             | [`0x0d9a97e8…e26a`](https://basescan.org/tx/0x0d9a97e8dbdf3dfa0003a8fb5732859cb73d044255175167843b13532c1ce26a) (TradeLog) | 54,089,339 |
+| 5   | Prediction market opened (Arena entry #1)         | [`0x04d7e882…1ad8`](https://basescan.org/tx/0x04d7e882b1b6b4b3450611989fbd1b4ca5b6e73fd053f05246981ee5f84a1ad8) (Arena)    | 54,089,356 |
+
+**Committed before executed.** The commit (block 54,089,264) lands 62 blocks before the fill
+(54,089,326), and the fill is recorded against that commit afterwards.
+
+**Bound to a sealed 0G decision.** The commit's `IntentCommitted` event (BaseScan → Logs) carries
+`zeroGRequestIdHash = 0x3f55d41cb432bb92e20eb17bcab7a195f9b7f1d55f45b9e5ed58c11ff9c33a91`, which is
+`keccak256` of the 0G request ID `981afd76-c845-425e-8167-59edf63ade67` (decision recorded with
+`tee_verified: true`). Check it with:
+
+```sh
+cast keccak 981afd76-c845-425e-8167-59edf63ade67
+```
+
+The event's third topic, `0x34984c60…1ea9`, is the hash of the canonical trade intent (section 5.1
+of the design): change any field of the trade and the hash no longer matches.
+
+**Failures are logged too.** Before this fill, three limit-entry attempts were refused by Flash at
+the quote step. Each one was still committed and then recorded as failed, for example commit
+[`0x4ff54c88…6fb3`](https://basescan.org/tx/0x4ff54c882e92c56b58fb1fac1a499f2ce6fc695f49e364f3bbf8cf4a9c7b6fb3)
+and failure
+[`0x9dd63252…468f`](https://basescan.org/tx/0x9dd63252198b2254ca39b2eb4f370015b619007d0092608223e86ea2dae1468f).
+A trader cannot hide an attempt.
+
+**Still to come for this entry:** predictions, `lockPredictions`, the bracket exit or time-limit
+sale, `resolveEntry` with PnL from the fills, and an epoch `publishEpoch` / `claim`.
+
+**Re-check it yourself** (no keys, sends nothing):
+
+```sh
+SERVER_URL=<our server URL> RPC_URL=https://base-rpc.publicnode.com pnpm verify 1
+```
+
+`SERVER_URL` is where the script fetches the entry's claims; every claim is then checked against
+Base, so the server is not trusted. `RPC_URL` is optional but recommended: the default
+`mainnet.base.org` rate-limits the log queries (`429`), and any Base RPC works. Run on
+2026-11-07 against entry 1, every check that can run before resolution passed: entry state,
+predictions closed onchain, no self-prediction, commits complete with hashes recomputed, every
+commit closed, commit before fill, and the 0G decision re-verified with the 0G SDK. Fills, PnL and
+Brier report SKIP until the entry resolves.
+
 ## Trust assumptions
 
 - The **operator** resolves entries from public Flash fills and publishes rewards from public
