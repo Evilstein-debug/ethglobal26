@@ -1,43 +1,12 @@
 import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { test } from 'node:test'
 import { sql } from 'drizzle-orm'
-import { openDb, queryRows, schema, type DbHandle } from './index'
+import { queryRows, schema } from './index'
+import { errorText, freshDb } from './testing'
 
-// Default: in-memory PGlite. Set TEST_DATABASE_URL to also exercise the node-postgres driver
-// (the production path to Neon). Each test wipes the public schema, so only localhost is allowed.
-const TEST_URL = process.env.TEST_DATABASE_URL
-if (TEST_URL && !/@(localhost|127\.0\.0\.1)(:\d+)?\//.test(TEST_URL)) {
-  throw new Error('TEST_DATABASE_URL must point at localhost: tests drop the public schema')
-}
-
-const handles: DbHandle[] = []
-async function freshDb() {
-  if (TEST_URL) {
-    const reset = await openDb(TEST_URL)
-    await reset.db.execute(
-      sql`drop schema if exists public cascade; drop schema if exists drizzle cascade; create schema public`,
-    )
-    await reset.close()
-  }
-  const handle = await openDb(TEST_URL ?? 'memory://')
-  handles.push(handle)
-  return handle.db
-}
-after(async () => {
-  await Promise.all(handles.map((h) => h.close()))
-})
-
-/** Drizzle wraps driver errors; match against the whole cause chain. */
 async function rejectsWith(promise: Promise<unknown>, pattern: RegExp) {
   await assert.rejects(promise, (err: unknown) => {
-    let text = ''
-    for (
-      let e = err as { message?: string; cause?: unknown } | undefined;
-      e;
-      e = e.cause as typeof e
-    )
-      text += ` ${e.message ?? ''}`
-    assert.match(text, pattern)
+    assert.match(errorText(err), pattern)
     return true
   })
 }
