@@ -15,24 +15,25 @@ scripts              dev.ts, e2e-happy.ts, verify.ts, seed-replay.ts, flash-insp
 
 ## Server map
 
-| Path                      | Job                                                                  |
-| ------------------------- | -------------------------------------------------------------------- |
-| `src/rounds/scheduler.ts` | Round state machine, driven by the `rounds` table so restarts resume |
-| `src/brain/`              | 0G prompts, the three decisions, validation and clamping             |
-| `src/policy/authorize.ts` | Limits and atomic budget reservation; the only way to get a budget   |
-| `src/wallets/`            | Encrypted keys, egress allowlist, the signer                         |
-| `src/execution/`          | Commit → quote → approve → sign → submit → record; close             |
-| `src/rounds/resolver.ts`  | PnL from fills, outcome, Brier, stats                                |
-| `src/rewards/epoch.ts`    | Rankings, one award per human, `publishEpoch`                        |
-| `src/rounds/indexer.ts`   | Owner actions sent from browsers: manual predictions, reward claims  |
-| `src/routes/`             | HTTP API                                                             |
-| `src/services/replay.ts`  | Labeled replay rows                                                  |
+| Path                       | Job                                                                     |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `src/rounds/scheduler.ts`  | Agent and market loops, driven by the `rounds` table so restarts resume |
+| `src/brain/`               | News, the agent's `think` step, 0G prompt, validation and clamping      |
+| `src/policy/authorize.ts`  | Limits and atomic budget reservation; the only way to get a budget      |
+| `src/wallets/`             | Encrypted keys, egress allowlist, the signer                            |
+| `src/execution/`           | Commit → quote → approve → sign → submit → record; close                |
+| `src/rounds/resolver.ts`   | PnL from fills, outcome, Brier, stats                                   |
+| `src/rewards/epoch.ts`     | Rankings, one award per human, `publishEpoch`                           |
+| `src/rounds/indexer.ts`    | Owner actions sent from browsers: manual predictions, reward claims     |
+| `src/services/activity.ts` | What each agent is doing, for the Live tab                              |
+| `src/routes/`              | HTTP API                                                                |
+| `src/services/replay.ts`   | Labeled replay rows                                                     |
 
 ## One trade
 
 ```mermaid
 sequenceDiagram
-  participant S as Scheduler
+  participant S as Agent
   participant G as 0G (TeeML)
   participant P as Policy engine
   participant T as TradeLog
@@ -41,11 +42,12 @@ sequenceDiagram
   G-->>S: JSON + request ID + tee_verified
   S->>S: validate; reject or clamp
   S->>P: authorize and reserve budget
-  S->>T: commit(round, intentHash, requestIdHash)
+  S->>T: commit(market, intentHash, requestIdHash)
   T-->>S: receipt (nothing goes to Flash before this)
   S->>F: quote, approvals, sign entry + bracket, submit
   F-->>S: fill
   S->>T: recordExecution or recordFailure
+  Note over S,F: The market loop then opens the entry and wakes predictors
 ```
 
 ## Where each guarantee lives
@@ -53,9 +55,11 @@ sequenceDiagram
 - **One human, one account:** unique `owners.world_nullifier_hash`.
 - **No self-prediction:** `Arena.predict` reverts on the same human; the prediction worker only
   offers other humans' entries, and validation drops anything else.
-- **Predictions close before trading:** `Arena.lockPredictions`, checked against commit order in
-  `verify.ts`.
+- **Predictions close before the outcome is known:** `Arena.lockPredictions` no later than the exit;
+  on Flash, a prediction landing at or after the exit fill stays unscored, checked in `verify.ts`.
 - **Commit before trade:** order in `execution/trade.ts`, covered by tests.
+- **A market only opens on a real fill:** the market loop is the only caller of `openEntry`, after
+  the intent is EXECUTED; `verify.ts` checks commit, then fill, then open.
 - **No hidden trades:** `TradeLog` requires each commit to end Executed or Failed; `verify.ts`
   compares onchain commits with the intents the server claims.
 - **One award per human, capped epochs:** `Arena.publishEpoch`.

@@ -24,6 +24,17 @@ chain, and claimed 2 USDC through the Claim button.
 
 ## Implemented
 
+### Per-trade markets (design v4, anvil only)
+
+- Autonomous agents: one `think` step chooses buy, predict or wait; code decides what's on offer.
+- One market per trade, broadcast only after a confirmed fill; predictors woken at once.
+- Predictions lock at the window end or the exit; time-limit sale; reward epochs unchanged.
+- Edge cases tested: exit inside the window, late predictions, own-agent predictions, no predictors,
+  failed orders, restart recovery, retrying `openEntry`, pause mid-trade, limit edits, spam limits,
+  no gas or funds, and verifying an entry.
+- Live tab with each agent's state, reasoning, 0G request IDs and rejected decisions.
+- Optional RSS news with the labeled fixture as fallback.
+
 **Contracts.** `TradeLog` (commit before trade; every commit ends Executed or Failed) and `Arena`
 (human registry, entries, predictions, reward epochs). Same-human predictions and late predictions
 revert; one award per human per epoch; capped epochs; claims paid only to the owner wallet.

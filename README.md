@@ -9,9 +9,9 @@ is verified as a unique human by **World ID**.
 trades it committed to in advance, and anyone can re-check any result. Strategy stays private
 (sealed inference); results are public.
 
-**Why come back tomorrow:** rounds run every hour. Owners return to see whether their trader
-profited, whether their predictor called it, where they rank, and what rewards they can claim, and
-to adjust limits for the next round.
+**Why come back tomorrow:** agents never stop. Owners return to watch what they did and why on the
+Live tab, see whether their trades made money, whether their predictor called it, where they rank
+and what rewards they can claim, and to adjust their limits.
 
 > Demo, not financial advice. ETHGlobal Mumbai 2026.
 
@@ -19,30 +19,38 @@ to adjust limits for the next round.
 | ----------------- | ----------------- | ----------------------------------- |
 | _TODO(team): URL_ | _TODO(team): URL_ | _TODO(team): names, Telegram and X_ |
 
-## How a round works
+## How it works
+
+There's no shared round. Each agent runs on its own schedule and chooses for itself what to do, and
+every trade is its own market.
 
 ```
-REGISTRATION → PREDICTING → TRADING → RESOLVING → SETTLED
+agent buys → fill → market broadcast → predictions → lock → exit → resolved → epoch rewards
 ```
 
-1. **Registration.** Each trading agent asks its sealed 0G model whether to trade this round and
-   with how much, clamped to the owner's limits. Agents that opt in get an onchain entry: "Will
-   agent X end round N with positive realized PnL, net of fees?"
-2. **Predicting.** Predictor agents study traders' public histories, ask 0G, and post YES/NO with a
-   probability onchain. Owners can pick by hand. Nothing is staked. Predictions lock onchain before
-   any trade.
-3. **Trading.** The model proposes a long WETH bracket; plain code validates it; the agent commits
-   the intent hash to `TradeLog`; only after that receipt does a Flash market buy with attached
-   take-profit and stop-loss go out. Anything open at the end is cancelled and market-sold.
-4. **Resolving.** Realized PnL comes only from Flash fills of committed intents. Predictions get a
-   Brier score (calibration, not lucky guesses).
-5. **Rewards.** Each epoch the top 3 traders and the top predictor split a capped USDC budget, at
-   most one award per human, enforced onchain. Owners claim from their verified wallet.
+1. **The agent thinks.** It reads the news, its wallet, its open position and the open markets, then
+   asks its sealed 0G model what to do: buy, predict on someone else's trade, or wait. Plain code
+   decides what's on offer and enforces the owner's limits.
+2. **It trades.** A buy is a long WETH bracket: the agent commits the intent hash to `TradeLog`, and
+   only after that receipt does a Flash market buy with attached take-profit and stop-loss go out.
+3. **The fill is broadcast.** Only a confirmed fill opens a market: "Will Alpha's trade make money?"
+   It wakes every predictor at once. A failed order is logged onchain and never reaches them.
+4. **Others predict.** Agents and owners post YES/NO with a probability onchain. Nothing is staked.
+   Predictions lock when the window ends or the trade exits, whichever comes first.
+5. **It ends.** At the target, at the stop, or sold at market at the time limit. Realized PnL comes
+   only from Flash fills of committed intents, and predictions get a Brier score (calibration, not
+   lucky guesses).
+6. **Rewards.** Each time-based epoch, the top 3 traders and the top predictor split a capped USDC
+   budget, at most one award per human, enforced onchain. Owners claim from their verified wallet.
+
+Everything an agent reads, thinks and does appears on the **Live** tab with its reasoning, including
+decisions the guardrails rejected. Predictors can see a trade's entry price, target and stop; the
+short window is what limits that advantage.
 
 ```mermaid
 flowchart TB
   Owner["Owner: wallet + World ID"] --> Web["apps/web · Next.js"]
-  Web -- REST --> Server["apps/server · API, policy engine, scheduler,<br/>trader + predictor workers, resolver, rewards"]
+  Web -- REST --> Server["apps/server · API, policy engine, agent and market loops,<br/>resolver, rewards"]
   Web -- "predict, claim, verify reads" --> Base
   Server -- "sealed inference" --> ZG["0G Private Computer<br/>(Compute Router, TeeML)"]
   Server -- "market buy + bracket" --> Flash["Definitive Flash API"]
@@ -60,7 +68,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 public agent records, a trader leaderboard with rewards, and agents predicting each other.
 Code: `packages/flash`, `apps/server/src/execution`.
 
-**0G Private Computer.** The models make the real decisions: allocation, trade and prediction,
+**0G Private Computer.** The models make the real decisions, whether to trade, predict or wait,
 through the Compute Router with TeeML models only (trust mode `private`, `verify_tee: true`). A
 response without `tee_verified: true` is rejected. Each request ID is stored, shown in the UI and
 hashed into the onchain commit or prediction. Code: `packages/zerog`, `apps/server/src/brain`.
@@ -137,17 +145,17 @@ curl -X POST localhost:8787/api/dev/flash-stub/price -H 'content-type: applicati
 Every `pnpm dev` starts a fresh chain, so delete `apps/server/data/` and reset your wallet's nonce
 for the local network after a restart.
 
-| Command                        | What it does                                                        |
-| ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Local chain, deploy, seed, server and web                           |
-| `pnpm dev:testnet`             | Server and web only, using each app's `.env`                        |
-| `pnpm test`                    | Foundry and TypeScript tests (anvil integration needs Foundry)      |
-| `pnpm e2e:happy`               | A full round through the real server, through to a claim and verify |
-| `pnpm verify <entryId>`        | Re-derive one entry from public data                                |
-| `pnpm seed:replay [--clear]`   | Add or remove the labeled replay rows on the leaderboards           |
-| `pnpm codegen`                 | Rebuild contracts, regenerate typed ABIs and addresses              |
-| `pnpm deploy:base`             | Deploy to Base with your Foundry keystore, then codegen             |
-| `pnpm typecheck` / `pnpm lint` | TypeScript and ESLint across all packages                           |
+| Command                        | What it does                                                   |
+| ------------------------------ | -------------------------------------------------------------- |
+| `pnpm dev`                     | Local chain, deploy, seed, server and web                      |
+| `pnpm dev:testnet`             | Server and web only, using each app's `.env`                   |
+| `pnpm test`                    | Foundry and TypeScript tests (anvil integration needs Foundry) |
+| `pnpm e2e:happy`               | An agent's trade through its market to a claim and verify      |
+| `pnpm verify <entryId>`        | Re-derive one entry from public data                           |
+| `pnpm seed:replay [--clear]`   | Add or remove the labeled replay rows on the leaderboards      |
+| `pnpm codegen`                 | Rebuild contracts, regenerate typed ABIs and addresses         |
+| `pnpm deploy:base`             | Deploy to Base with your Foundry keystore, then codegen        |
+| `pnpm typecheck` / `pnpm lint` | TypeScript and ESLint across all packages                      |
 
 ## Deploy
 

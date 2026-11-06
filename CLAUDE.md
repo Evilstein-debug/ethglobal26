@@ -8,6 +8,8 @@
 >
 > **Design v3 (2026-11-06).** The original real-money prediction market was replaced by a **trader leaderboard with a capped reward pool** plus **free (no-stake) predictions**. Reasons: Flash has no testnet so every market would need real house money, real-money betting by agents raised legal questions (old Q5), and the smaller scope fits the deadline. Flash is spot-only, so **trades are long-only**.
 
+> **Design v4 (2026-11-06) replaces the shared round timer.** Where this doc still says "round", read "market". There is one market per trade: an agent chooses for itself to buy, predict or wait; a confirmed fill immediately opens the market and wakes predictors; predictions lock at the window end or the exit, whichever comes first; a position is sold at its time limit. Reward epochs stay time-based. The `rounds` table and Arena's `roundId` are the market id, so the contracts did not change. Sections 3.1 and 3.3 and layer 6 below describe v4; the Live tab shows each agent's state and reasoning.
+
 ---
 
 ## 1. Hackathon context and constraints
@@ -84,23 +86,23 @@ Rules that shape the design:
 
 **Chain:** everything onchain is on **Base mainnet** (anvil locally). Flash supports mainnets only, so trades use tiny real USDC. TradeLog and Arena are on Base too, so "committed before executed" and "predictions closed before trading" are block-order checks on one chain.
 
-### 3.1 Round lifecycle (state machine)
+### 3.1 Market lifecycle (state machine)
 
-Rounds are short for the demo (default about **20 minutes total**, configurable).
+Every trade is its own market. Agents and markets run in two independent loops.
 
 ```
-REGISTRATION -> PREDICTING -> TRADING -> RESOLVING -> SETTLED
-                                              |
-                                              +-> entry VOID (no trades, snapshot mismatch, error)
+OPENING -> PREDICTING -> TRADING -> RESOLVING -> SETTLED
 ```
 
-| Phase                 | What happens                                                                                                                                                                                                                   |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| REGISTRATION (~3 min) | Agents in `trade`/`both` mode ask 0G whether to trade this round and with how much (clamped by policy). Each opting-in trader gets a **round entry** (`Arena.openEntry`). Its policy is **snapshotted**.                       |
-| PREDICTING (~4 min)   | Predictor agents read histories, ask 0G, and submit predictions onchain (`Arena.predict`). Owners can pick manually. Then `lockPredictions`: the contract rejects later predictions. Predictions close **before any trading**. |
-| TRADING (~10 min)     | Traders make 0G decisions, commit each trade intent to TradeLog, then place a Flash market buy with an attached bracket. At the end of the phase, any open bracket is cancelled and the position is market-sold.               |
-| RESOLVING             | The resolver computes each trader's realized PnL from Flash fills of this round's committed intents, resolves each entry on Arena, and scores predictions.                                                                     |
-| SETTLED               | Stats and leaderboards update. Reward epochs are computed and published separately.                                                                                                                                            |
+| Phase      | What happens                                                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OPENING    | The agent chose to buy. Commit, Flash order, fill. Only after the fill does `Arena.openEntry` broadcast the market. A failed trade settles here, with no entry. |
+| PREDICTING | Predictors are woken and may predict for `PREDICTION_WINDOW_MS`. Owners can pick manually. Ends early if the trade exits. Then `lockPredictions`.               |
+| TRADING    | Predictions locked, position still open. It ends at the target, the stop, or at `TRADE_MAX_HOLD_MS` by cancelling the bracket and market-selling.               |
+| RESOLVING  | The resolver computes realized PnL from Flash fills of the committed intent, resolves the entry on Arena and scores predictions.                                |
+| SETTLED    | Stats and leaderboards update. Reward epochs are computed and published separately, once all of an epoch's markets have settled.                                |
+
+An entry goes VOID only if its position couldn't be closed within a grace period (for example the agent is paused). Changing limits never voids a trade. Paused agents sign nothing; a leftover position is sold after resume.
 
 ### 3.2 Trade intent lifecycle
 
@@ -115,10 +117,10 @@ DRAFT -> COMMITTED -> EXECUTING -> EXECUTED -> CLOSED
 ### 3.3 End-to-end example
 
 1. Bob connects his wallet, verifies with World ID (Proof of Human), creates **Alpha** (`trade` mode) and funds it with 20 USDC. Alice, also verified, creates **Beta** (`predict` mode).
-2. Round 7 opens. Alpha's 0G model decides to trade with 10 USDC. Alpha gets entry #12: "Will Alpha end Round 7 in profit?"
-3. Beta reads Alpha's history (past rounds, win rate, PnL, voids, failures), asks its 0G model, and predicts YES at 62%. The 0G request ID's hash is stored with the prediction onchain.
-4. Predictions lock. Alpha's 0G model returns a long-WETH bracket. Code validates it, Alpha commits the intent hash to TradeLog, then places a Flash market buy with take-profit and stop-loss attached.
-5. The take-profit fills. The resolver computes Alpha's realized PnL from the fills: positive. Entry #12 resolves YES. Beta's Brier score for this pick is (1 − 0.62)² = 0.144.
+2. Alpha reads the news and thinks. Its 0G model returns a long-WETH bracket for 5 USDC. Code validates it, Alpha commits the intent hash to TradeLog, then places a Flash market buy with take-profit and stop-loss attached.
+3. The buy fills. Market #7 and entry #12 open at once: "Will Alpha's trade make money?" Beta is woken.
+4. Beta reads Alpha's history (past trades, win rate, PnL, voids, failures) and the trade, asks its 0G model, and predicts YES at 62%. The 0G request ID's hash is stored with the prediction onchain.
+5. Predictions lock when the window ends. The take-profit fills. The resolver computes Alpha's realized PnL from the fills: positive. Entry #12 resolves YES. Beta's Brier score for this pick is (1 − 0.62)² = 0.144.
 6. At the end of the epoch, Alpha ranks #1 among traders and Beta #1 among predictors. Bob and Alice each claim their reward from the pool.
 7. If Bob had made a second account to predict on Alpha, World ID would have blocked it (same human, same nullifier). If Bob's own predictor tried, `Arena.predict` reverts (same human).
 
@@ -324,11 +326,12 @@ Docs: `https://flash.definitive.fi/docs` (index: `/docs/llms.txt`, spec: `/v1/op
 - Persist order ID, `bracketOrderId`, fill tx hashes (`fills[].transactionId`) and notional amounts.
 - **Close at the end of TRADING:** cancel the bracket order, then market-sell the WETH. Expiry alone does not sell.
 
-### Layer 6: Round scheduler
+### Layer 6: Agent and market loops
 
-- A worker drives phases on a timer: REGISTRATION → PREDICTING → TRADING → RESOLVING → SETTLED.
-- REGISTRATION: allocation decisions, policy snapshots, `openEntry`. PREDICTING: predictor workers, then `lockPredictions`. TRADING: trader workers, then close all positions.
-- Round length and phase durations come from config (demo default: 3 / 4 / 10 min + resolution). Live: one round per hour.
+- Agent loop: each active agent thinks on its own schedule (`AGENT_THINK_MS`, or at once when a market it could predict on opens). It skips the model when nothing is open to it, and records its state and reasoning for the Live tab.
+- Market loop: the only opener of entries. Broadcasts fills, watches exits, locks, sells at the time limit, resolves, retries after failures and recovers intents stuck by a restart.
+- Both are driven by the database, so a restart resumes where it stopped. Slow model calls never delay an exit.
+- Limits: one open position per agent, a cooldown, per-trade and daily caps, predictions per day.
 
 ### Layer 7: Resolver and rewards
 

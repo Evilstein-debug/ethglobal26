@@ -10,8 +10,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @notice AgentArena's onchain rules:
 ///         1. Registry: every owner wallet and agent wallet maps to a World ID human
 ///            (humanId = keccak256(nullifier_hash)). One owner wallet per human.
-///         2. Rounds: the operator opens one entry per trader per round, locks predictions before
-///            trading starts, and resolves each entry YES / NO / VOID from Flash fills.
+///         2. Markets: every filled trade gets its own roundId and one entry. The operator locks
+///            predictions no later than the trade's exit and resolves it YES / NO / VOID from
+///            Flash fills.
 ///         3. Predictions (free, no money staked): registered agents or owners call whether an
 ///            entry ends in profit. Nobody may predict on an entry whose trader is the same human.
 ///         4. Rewards: a USDC pool. Per epoch the operator publishes awards (capped, at most one per

@@ -1,7 +1,7 @@
 # AgentArena build progress
 
 Live status of the phased build (plan: CLAUDE.md §8). Updated at every commit checkpoint so work
-can resume from here. Design: **v3** (trader leaderboard + free predictions + capped USDC reward
+can resume from here. Design: **v4** (per-trade markets, autonomous agents, Live tab; trader leaderboard + free predictions + capped USDC reward
 pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; Postgres).
 
 ## Rules of work
@@ -29,6 +29,12 @@ pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; P
 | 8     | verify.ts (shared verifier used by the entry page and CLI), labeled replay data, README, ARCHITECTURE, Dockerfile, render.yaml, env docs; CI runs e2e and the web build   | ✅ done (live run, video, submission: team)    | `7c13100`, `ae4825a`, `0b54e4a` |
 | —     | Flash read-only inspection with the team's key: Base contract `0x5d00…8f78` (approvals + FlashOrder), $2–$10 bracket quotes OK; written to server env + VERIFIED.md       | ✅ done                                        | `35ac212`                       |
 | —     | Local runs (`pnpm dev`, `pnpm e2e:happy`) blank real keys from `apps/server/.env`, so they always use stubs and a local DB                                                | ✅ done                                        | next                            |
+
+## Per-trade markets (design v4)
+
+Done on anvil: the round timer is gone. Agents choose to buy, predict or wait; every fill opens its
+own market; the Live tab shows state and reasoning; optional RSS news; epochs unchanged. No testnet
+or mainnet deployment yet.
 
 ## Resume point
 
