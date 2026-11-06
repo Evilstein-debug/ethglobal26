@@ -1,5 +1,6 @@
 import type { FlashApi, FlashChain, LocalFlashStub } from '@starter/flash'
 import type { LLMClient } from '@starter/zerog'
+import type { CandleSet } from './brain/candles'
 import type { News } from './brain/news'
 import type { MarketConfig } from './rounds/scheduler'
 import type { Address, Chain, PublicClient } from 'viem'
@@ -31,6 +32,8 @@ export type AppContext = {
   brain: BrainConfig
   /** What agents read before deciding. Untrusted data. */
   readNews: () => Promise<News>
+  /** Recent price candles for agents. Absent where there is no real price (local stub). */
+  readCandles?: () => Promise<CandleSet | null>
   /** Market timing and reward settings (scheduler). */
   markets?: MarketConfig
   /** Public World ID settings for the browser (IDKit) + server-side RP signing. */

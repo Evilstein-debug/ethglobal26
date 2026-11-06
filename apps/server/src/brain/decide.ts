@@ -18,6 +18,8 @@ import { authorizePrediction, authorizeTrade } from '../policy/authorize'
 import { reserveMarket, settleEmptyMarket, type MarketConfig } from '../rounds/scheduler'
 import { setStatus, type AgentState } from '../services/activity'
 import { agentSigner, balancesOf } from '../services/agents'
+import { summarizeCandles } from './candles'
+import { recentMemory } from './memory'
 import { dataBlock, THINK_SYSTEM } from './prompts'
 import { parseModelJson, validateThink, type PredictionDecision } from './validate'
 
@@ -178,6 +180,18 @@ async function openPosition(ctx: AppContext, agentId: string) {
   )
 }
 
+/** Flash's 24h numbers for the asset; null when Flash doesn't report them (e.g. the local stub). */
+function statsOf(asset?: { priceChange24h?: string; volume24h?: string; liquidity?: string }) {
+  const change = Number(asset?.priceChange24h)
+  if (!asset || asset.priceChange24h === undefined || !Number.isFinite(change)) return null
+  return {
+    source: 'Flash /search',
+    change24hPct: Math.round(change * 10_000) / 100,
+    volume24hUsd: Math.round(Number(asset.volume24h)) || null,
+    liquidityUsd: Math.round(Number(asset.liquidity)) || null,
+  }
+}
+
 const REFUSED: Record<string, string> = {
   position_open: 'Already holding a position',
   cooldown: 'Cooling down after its last trade',
@@ -274,7 +288,13 @@ export async function think(
     },
     position: (await openPosition(ctx, agent.id)) ?? null,
     actions: { trade: canTrade, predict: canPredict },
-    market: { asset: 'WETH', livePriceUsd: livePrice || null },
+    market: {
+      asset: 'WETH',
+      livePriceUsd: livePrice || null,
+      stats24h: statsOf(asset[0]),
+      candles: canTrade && ctx.readCandles ? summarizeCandles(await ctx.readCandles()) : null,
+    },
+    memory: { recentDecisions: await recentMemory(ctx, agent.id) },
     limits: {
       maxSizeUsdc: maxSize / 1e6,
       minRiskPct: b.minRiskPct,

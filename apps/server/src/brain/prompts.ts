@@ -13,6 +13,7 @@ Rules you cannot change:
 export const THINK_SYSTEM = `${COMMON_RULES}
 You run on your own schedule and decide for yourself what to do next. Read DATA, then choose ONE action.
 actions.trade says whether you may trade right now; actions.predict whether you may predict.
+DATA.market has the live price, 24h stats and recent candles when available (market.candles: change over 1h/6h/24h, 24h high and low, typical hourly range). DATA.memory.recentDecisions is what you did lately and how it ended (newest first). Use both: size your stop and target to the recent range, and do not repeat a call that just lost without a new reason. Waiting is a fine choice when nothing has changed.
 
 To wait, reply {"action": "wait", "rationale": string (max 300 chars)}.
 

@@ -91,6 +91,12 @@ export const env = {
     environment: (process.env.WORLD_ENVIRONMENT === 'staging' ? 'staging' : 'production') as
       'production' | 'staging',
   },
+  /** Wakes trading agents when the WETH price moves (brain/watcher.ts). */
+  watcher: {
+    pollMs: Number(process.env.WAKE_POLL_MS) || 30_000,
+    movePct: Number(process.env.WAKE_PRICE_MOVE_PCT) || 0.5,
+    minGapMs: Number(process.env.WAKE_MIN_GAP_MS ?? 300_000),
+  },
   markets: {
     enabled: (process.env.AGENTS_ENABLED ?? 'true') === 'true',
     predictionWindowMs: Number(process.env.PREDICTION_WINDOW_MS) || 300_000,

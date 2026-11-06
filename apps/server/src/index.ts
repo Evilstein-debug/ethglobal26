@@ -21,7 +21,9 @@ import { contractsOn } from './chain/contracts'
 import { createArenaOps } from './chain/operator'
 import { DEFAULT_BRAIN, DEV_FAUCET, type AppContext, type FlashSetup } from './context'
 import { ZeroGClient, type LLMClient } from '@starter/zerog'
+import { candleReader } from './brain/candles'
 import { localModel } from './brain/local-model'
+import { startPriceWatcher } from './brain/watcher'
 import { newsReader } from './brain/news'
 import { openDb, schema } from './db'
 import { env } from './env'
@@ -247,9 +249,13 @@ if (env.localPriceFeedUrl && ctx.flash?.stub) {
   console.log('[server] WETH price: live, fills still simulated')
 }
 
+// Candles come from a real market, so skip them when the local stub's fake price is in use.
+if (ctx.flash && (!ctx.flash.stub || ctx.livePrices)) ctx.readCandles = candleReader()
+
 startPredictionIndexer(ctx)
 if (env.markets.enabled) {
   startScheduler(ctx, ctx.markets!)
+  startPriceWatcher(ctx, env.watcher)
   const m = env.markets
   console.log(
     `[server] agents think every ${m.thinkEveryMs / 1000}s; markets: ${m.predictionWindowMs / 1000}s to predict, ${m.maxHoldMs / 1000}s max hold, epoch ${m.epochMs / 60000} min`,

@@ -165,6 +165,10 @@ export type FlashAsset = {
   price: string
   liquidity: string
   riskFlagged: boolean
+  /** Present on live /search responses (priceChange24h is a decimal: -0.0174 = -1.74%). */
+  priceChange24h?: string
+  volume24h?: string
+  marketCap?: string
 }
 
 /** The calls AgentArena makes. FlashClient talks to Flash; LocalFlashStub is for anvil tests. */
