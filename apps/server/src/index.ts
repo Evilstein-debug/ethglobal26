@@ -220,6 +220,7 @@ const ctx: AppContext = {
   brain: {
     ...DEFAULT_BRAIN,
     minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct,
+    minTrade: Math.round(env.zerog.minTradeUsdc * 1e6) || DEFAULT_BRAIN.minTrade,
     tradeCooldownMs: env.markets.cooldownMs,
     maxSteps: env.markets.maxSteps,
     twap: {

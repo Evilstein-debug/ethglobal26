@@ -91,6 +91,8 @@ export const env = {
     timeoutMs: Number(process.env.ZEROG_TIMEOUT_MS) || 150_000,
     /** Minimum take-profit distance (fraction); set from measured Flash round-trip fees. */
     minTpPct: process.env.TRADE_MIN_TP_PCT ? Number(process.env.TRADE_MIN_TP_PCT) : undefined,
+    /** Smallest trade an agent may place, in USDC. Flash quotes buys down to 0.1 USDC at no fee. */
+    minTradeUsdc: Number(process.env.TRADE_MIN_USDC || '0.25'),
   },
   /**
    * Hand-written trades (no 0G decision) for smoke-testing the Flash pipeline. Default: only on
