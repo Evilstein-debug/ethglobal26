@@ -126,6 +126,9 @@ export const env = {
     epochBudget: Number(process.env.REWARD_EPOCH_BUDGET) || 5_000_000,
     minEntries: Number(process.env.REWARD_MIN_ENTRIES) || 1,
     minPredictions: Number(process.env.REWARD_MIN_PREDICTIONS) || 2,
+    /** ETH an agent must hold before it thinks about trading or predicting. On Base at ~0.006
+     *  gwei one trade (approve, commit, record) costs ~0.000002 ETH, so 0.000003 covers it. */
+    minGasEth: process.env.AGENT_MIN_GAS_ETH || '0.000003',
   },
   /**
    * How owners prove they're human. 'world' verifies IDKit proofs with World (Phase 6).

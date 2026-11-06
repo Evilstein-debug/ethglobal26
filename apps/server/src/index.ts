@@ -204,7 +204,7 @@ const ctx: AppContext = {
     predictionWindowMs: env.markets.predictionWindowMs,
     maxHoldMs: env.markets.maxHoldMs,
     thinkEveryMs: env.markets.thinkEveryMs,
-    minGasWei: parseEther('0.00001'),
+    minGasWei: parseEther(env.markets.minGasEth),
     closeGraceMs: 300_000,
     epochMs: env.markets.epochMs,
     epoch: {

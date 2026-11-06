@@ -1,6 +1,7 @@
 'use client'
 
 import { ConnectButton as RainbowConnect } from '@rainbow-me/rainbowkit'
+import { ethAmount } from '@/lib/api'
 import { Button } from './ui'
 
 /** RainbowKit's modals with our own square buttons. Handles connect, wrong network, account. */
@@ -20,7 +21,9 @@ export function ConnectButton() {
         return (
           <Button variant="outline" onClick={openAccountModal} className="font-mono">
             {account.displayName}
-            {account.displayBalance ? ` · ${account.displayBalance}` : ''}
+            {account.balanceFormatted != null
+              ? ` · ${ethAmount(account.balanceFormatted)} ${account.balanceSymbol ?? 'ETH'}`
+              : ''}
           </Button>
         )
       }}

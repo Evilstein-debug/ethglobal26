@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useAccount } from 'wagmi'
 import { Badge, Button, Empty, Field, PageHeader, Panel, Select, short } from '@/components/ui'
-import { api, errorText, useApi, useOwnerAuth } from '@/lib/api'
+import { api, errorText, ethAmount, useApi, useOwnerAuth } from '@/lib/api'
 import type { AgentView } from '@/lib/types'
 
 function CreateAgent() {
@@ -137,7 +137,7 @@ function Body() {
               <p className="font-mono text-xs text-mute">{short(a.address)}</p>
               <p className="text-sm text-body">
                 {a.balances
-                  ? `${a.balances.usdc} USDC · ${Number(a.balances.eth).toFixed(4)} ETH`
+                  ? `${a.balances.usdc} USDC · ${ethAmount(a.balances.eth)} ETH`
                   : 'balance unavailable'}
               </p>
             </Panel>

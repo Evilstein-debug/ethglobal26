@@ -9,7 +9,7 @@ import { useAccount, useBalance, useReadContract } from 'wagmi'
 import { DevWalletFunds } from '@/components/dev-tools'
 import { TxStatus } from '@/components/tx-status'
 import { Badge, Button, Empty, Field, Panel } from '@/components/ui'
-import { api, errorText, useApi, useHealth, useOwnerAuth } from '@/lib/api'
+import { api, errorText, ethAmount, useApi, useHealth, useOwnerAuth } from '@/lib/api'
 import { targetChain } from '@/lib/env'
 import { useTx } from '@/lib/use-tx'
 import { ModelBadge, TxLink } from '@/components/links'
@@ -58,8 +58,7 @@ function YourWallet({ usdc }: { usdc?: `0x${string}` }) {
   if (tokens == null || !eth) return null
   return (
     <p className="text-sm text-mute">
-      Your wallet: {formatUnits(tokens, 6)} USDC · {Number(formatUnits(eth.value, 18)).toFixed(4)}{' '}
-      ETH
+      Your wallet: {formatUnits(tokens, 6)} USDC · {ethAmount(formatUnits(eth.value, 18))} ETH
     </p>
   )
 }
@@ -216,7 +215,7 @@ export default function AgentPage() {
         </p>
         <p className="text-[16px] text-body">
           {agent.balances
-            ? `${agent.balances.usdc} USDC · ${Number(agent.balances.eth).toFixed(4)} ETH${agent.balances.weth ? ` · ${Number(agent.balances.weth).toFixed(6)} WETH` : ''}`
+            ? `${agent.balances.usdc} USDC · ${ethAmount(agent.balances.eth)} ETH${agent.balances.weth ? ` · ${Number(agent.balances.weth).toFixed(6)} WETH` : ''}`
             : 'balance unavailable'}
           {Number(agent.reservedUsdc) > 0 &&
             ` · ${agent.reservedUsdc} USDC reserved for an in-flight trade`}

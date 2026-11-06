@@ -23,6 +23,8 @@ export async function api<T = Record<string, unknown>>(
     method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
     headers: {
       'content-type': 'application/json',
+      // A free ngrok tunnel answers browsers with an HTML warning page unless this is set.
+      'ngrok-skip-browser-warning': '1',
       ...(opts.auth ? { authorization: opts.auth } : {}),
     },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
@@ -78,6 +80,16 @@ export type Health = {
 }
 
 export const useHealth = () => useApi<Health>('/health', 15_000)
+
+/** ETH amounts: 4 decimals normally, but small gas balances keep two significant digits
+ *  (0.0000126 → "0.000013") instead of rounding to zero. */
+export function ethAmount(value: number | string | null | undefined) {
+  const n = Number(value ?? 0)
+  if (!Number.isFinite(n) || n === 0) return '0'
+  return n >= 0.0001
+    ? n.toFixed(4)
+    : new Intl.NumberFormat('en-US', { maximumSignificantDigits: 2 }).format(n)
+}
 
 export const usdc = (n: number | null | undefined, digits = 2) =>
   n == null ? '—' : `${(n / 1e6).toFixed(digits)} USDC`
