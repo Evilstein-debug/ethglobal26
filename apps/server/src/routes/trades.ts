@@ -8,6 +8,7 @@ import { schema } from '../db'
 import { closePosition } from '../execution/close'
 import { executeTrade, newIntentId } from '../execution/trade'
 import { handler, HttpError } from '../http'
+import { tick } from '../rounds/scheduler'
 import { getAgent, getOwnedAgent } from '../services/agents'
 
 const decimal = z.string().regex(/^\d+(\.\d{1,8})?$/)
@@ -101,6 +102,16 @@ export function tradesRouter(ctx: AppContext) {
         const { priceUsd } = z.object({ priceUsd: z.number().positive() }).parse(req.body)
         stub.setPrice(priceUsd)
         res.json({ priceUsd, note: 'local Flash stub; not a real market' })
+      }),
+    )
+  }
+  /** LOCAL TEST ONLY: run one scheduler tick now (used by e2e with the timer disabled). */
+  if (ctx.devTools && ctx.rounds) {
+    const rounds = ctx.rounds
+    r.post(
+      '/dev/rounds/tick',
+      handler(async (_req, res) => {
+        res.json({ acted: await tick(ctx, rounds) })
       }),
     )
   }

@@ -10,6 +10,8 @@ import { ZeroGClient, type LLMClient } from '@starter/zerog'
 import { localModel } from './brain/local-model'
 import { openDb } from './db'
 import { env } from './env'
+import { startPredictionIndexer } from './rounds/indexer'
+import { startScheduler } from './rounds/scheduler'
 import { KeyBox } from './wallets/keybox'
 
 // Server-only work: agent keys, policy engine, 0G and Flash calls, scheduler, resolver.
@@ -106,6 +108,20 @@ const ctx: AppContext = {
   flash: flashSetup(),
   allowManualTrades: env.allowManualTrades,
   llm: llm(),
+  rounds: {
+    registrationMs: env.rounds.registrationMs,
+    predictingMs: env.rounds.predictingMs,
+    tradingMs: env.rounds.tradingMs,
+    gapMs: env.rounds.gapMs,
+    epochMs: env.rounds.epochMs,
+    epoch: {
+      budget: env.rounds.epochBudget,
+      minEntries: env.rounds.minEntries,
+      minPredictions: env.rounds.minPredictions,
+    },
+    maxTradeDecisions: 2,
+  },
+  devTools: env.isLocal,
   brain: { ...DEFAULT_BRAIN, minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct },
   now: Date.now,
 }
@@ -116,3 +132,14 @@ createApp(ctx, env.corsOrigins).listen(env.port, (error) => {
     `[server] http://localhost:${env.port} · chain ${chain.id} (${chain.name}) · rpc ${rpcUrl} · db ${dbKind}`,
   )
 })
+
+startPredictionIndexer(ctx)
+if (env.rounds.enabled) {
+  startScheduler(ctx, ctx.rounds!)
+  const r = env.rounds
+  console.log(
+    `[server] rounds: ${r.registrationMs / 1000}s / ${r.predictingMs / 1000}s / ${r.tradingMs / 1000}s, epoch ${r.epochMs / 60000} min`,
+  )
+} else {
+  console.log('[server] round timer disabled (ROUNDS_ENABLED=false)')
+}

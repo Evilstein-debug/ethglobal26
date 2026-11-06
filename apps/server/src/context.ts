@@ -1,5 +1,6 @@
 import type { FlashApi, FlashChain, LocalFlashStub } from '@starter/flash'
 import type { LLMClient } from '@starter/zerog'
+import type { RoundConfig } from './rounds/scheduler'
 import type { Address, Chain, PublicClient } from 'viem'
 import type { HumanVerifier } from './auth/human'
 import type { ArenaOps } from './chain/operator'
@@ -24,6 +25,10 @@ export type AppContext = {
   /** The agents' brain: 0G in production; a labeled local stub only on anvil. */
   llm?: LLMClient
   brain: BrainConfig
+  /** Round timing and reward settings (scheduler). */
+  rounds?: RoundConfig
+  /** LOCAL ANVIL ONLY: enables /api/dev/* helpers (stub price, manual round tick). */
+  devTools?: boolean
   now: () => number
 }
 

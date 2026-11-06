@@ -4,6 +4,7 @@ import express from 'express'
 import type { AppContext } from './context'
 import { errorHandler } from './http'
 import { agentsRouter } from './routes/agents'
+import { arenaRouter } from './routes/arena'
 import { ownersRouter } from './routes/owners'
 import { tradesRouter } from './routes/trades'
 
@@ -34,7 +35,7 @@ export function createApp(ctx: AppContext, corsOrigins: string[] = []) {
     })
   })
 
-  app.use('/api', ownersRouter(ctx), agentsRouter(ctx), tradesRouter(ctx))
+  app.use('/api', ownersRouter(ctx), agentsRouter(ctx), tradesRouter(ctx), arenaRouter(ctx))
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' })
   })

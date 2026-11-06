@@ -15,30 +15,38 @@ pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; P
 
 ## Status
 
-| Phase | Scope                                                                                                                                       | State                                          | Commit               |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------- |
-| 0     | Starter repurposed: anvil + Base, tokens, canonical hashing, schemas, env, stubs                                                            | ✅ done                                        | `81ad8a9`            |
-| —     | DB switched SQLite → Postgres (Neon prod via `pg`, PGlite local/tests)                                                                      | ✅ done                                        | `0e7aa0e`            |
-| 1     | TradeLog + Arena contracts, 36 forge tests (unit, fuzz, invariants), deploy script                                                          | ✅ done                                        | `5d5a198`            |
-| 2     | Key box, egress allowlist, signer, policy engine; owner auth, verify route (dev verifier on anvil), agent API                               | ✅ done                                        | `44fe63c`, `9cff6ca` |
-| 3     | Flash client + local stub; trade pipeline (commit → quote → approve → sign → submit → record), close; anvil integration tests               | ✅ done on anvil (live Base run pending: team) | `a473c32`, `6d60f15` |
-| 4     | 0G brain: client; allocation / trade / prediction decisions; validation, clamping, decisions log, injection fixtures                        | ✅ done on anvil (live 0G run pending: team)   | `3dd1f65`, `aba1f56` |
-| 5     | Scheduler ✅, resolver ✅, Brier scoring ✅, reward epochs ✅ (anvil full round + claim tested); read API + scheduler wiring + e2e round ⏳ | 🟡 in progress                                 | next                 |
-| 6     | World ID (IDKit) verifier replacing the dev verifier; onboarding UI                                                                         | ⬜                                             | —                    |
-| 7     | Web UI: arena, agent profile, entry detail, leaderboards, rewards                                                                           | ⬜                                             | —                    |
-| 8     | verify.ts, seed-replay, README, WORLD_FEEDBACK.md, deploy config                                                                            | ⬜                                             | —                    |
+| Phase | Scope                                                                                                                         | State                                          | Commit               |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------- |
+| 0     | Starter repurposed: anvil + Base, tokens, canonical hashing, schemas, env, stubs                                              | ✅ done                                        | `81ad8a9`            |
+| —     | DB switched SQLite → Postgres (Neon prod via `pg`, PGlite local/tests)                                                        | ✅ done                                        | `0e7aa0e`            |
+| 1     | TradeLog + Arena contracts, 36 forge tests (unit, fuzz, invariants), deploy script                                            | ✅ done                                        | `5d5a198`            |
+| 2     | Key box, egress allowlist, signer, policy engine; owner auth, verify route (dev verifier on anvil), agent API                 | ✅ done                                        | `44fe63c`, `9cff6ca` |
+| 3     | Flash client + local stub; trade pipeline (commit → quote → approve → sign → submit → record), close; anvil integration tests | ✅ done on anvil (live Base run pending: team) | `a473c32`, `6d60f15` |
+| 4     | 0G brain: client; allocation / trade / prediction decisions; validation, clamping, decisions log, injection fixtures          | ✅ done on anvil (live 0G run pending: team)   | `3dd1f65`, `aba1f56` |
+| 5     | Scheduler, resolver, Brier scoring, reward epochs, read API, owner-prediction indexer; e2e runs a full round → claim          | ✅ done on anvil                               | `8d7393e`, next      |
+| 6     | World ID (IDKit) verifier replacing the dev verifier; onboarding UI                                                           | ⬜                                             | —                    |
+| 7     | Web UI: arena, agent profile, entry detail, leaderboards, rewards                                                             | ⬜                                             | —                    |
+| 8     | verify.ts, seed-replay, README, WORLD_FEEDBACK.md, deploy config                                                              | ⬜                                             | —                    |
 
 ## Resume point
 
-**Next step:** finish Phase 5:
+**Next step:** Phase 6, World ID (IDKit):
 
-1. Read API (`apps/server/src/routes/arena.ts`): current round + entries (prediction split), entry
-   detail (intents with txs, predictions, decision request IDs), leaderboards (traders by return,
-   predictors by Brier; replay rows labeled), epochs + awards, agent activity.
-2. Wire `startScheduler` in `index.ts` behind `ROUNDS_ENABLED` (default on) with config from env
-   (`ROUND_*_MS`, `REWARD_EPOCH_*`).
-3. Indexer for owner manual predictions (`Predicted` events from owner wallets → predictions row).
-4. e2e:happy: run one fast round on anvil end to end through the server.
+1. Read World's current IDKit docs (package name, verify endpoint, `action`, `signal`, nullifier
+   scope, simulator/staging). Record in VERIFIED.md; start `WORLD_FEEDBACK.md`.
+2. `packages/world`: backend verification of the IDKit result (never trust the client) →
+   `HumanVerifier` with method `world`, `signal` = owner wallet.
+3. Server: `HUMAN_VERIFIER=world` default on Base (already enforced), wire it in `index.ts`.
+4. Web onboarding (Phase 7 UI): IDKit widget → `POST /api/owners/verify` with `{ proof }`;
+   success / already-registered / cancelled states.
+5. Tests: invalid proof, reused nullifier (already covered for the dev verifier), proof bound to
+   another wallet.
+
+Server API now available for the UI: `/api/rounds/current`, `/api/rounds/:id`, `/api/entries/:id`,
+`/api/leaderboard`, `/api/epochs`, `/api/owners/:wallet` (+ `/awards`), `/api/agents/:id`
+(+ `/intents`, `/activity`), owner routes (verify, create agent, policy, pause/resume, withdraw,
+trade-preview, manual-trade, close). Dev-only on anvil: `/api/dev/flash-stub/price`,
+`/api/dev/rounds/tick`.
 
 ## Things the team must do (agent can't)
 

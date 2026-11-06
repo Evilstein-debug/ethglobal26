@@ -43,6 +43,7 @@ const isLocal = isLocalChain(chainId)
 const rpcUrl = resolveRpcUrl(chain, process.env.RPC_URL)
 const serverUrl = process.env.SERVER_URL || 'http://localhost:8787'
 const pollingInterval = isLocal ? 200 : undefined
+const EPOCH_MS = 12_000
 
 const publicClient = createPublicClient({ chain, transport: http(rpcUrl), pollingInterval })
 const started: ChildProcess[] = []
@@ -94,6 +95,13 @@ async function setup() {
             CHAIN_ID: '31337',
             RPC_URL: LOCAL_RPC_URL,
             DATABASE_URL: 'memory://',
+            // Rounds are stepped by this script through /api/dev/rounds/tick (local only).
+            ROUNDS_ENABLED: 'false',
+            ROUND_REGISTRATION_MS: '1000',
+            ROUND_PREDICTING_MS: '1000',
+            ROUND_TRADING_MS: '1500',
+            REWARD_EPOCH_MS: String(EPOCH_MS),
+            REWARD_MIN_PREDICTIONS: '1',
           },
           stdio: 'ignore',
         }),
@@ -112,6 +120,7 @@ async function setup() {
 function owner() {
   const account = privateKeyToAccount(generatePrivateKey())
   return {
+    account,
     address: account.address,
     auth: async () => {
       const issuedAt = Date.now()
@@ -294,6 +303,140 @@ async function run() {
     `closed in profit: ${JSON.stringify(row)}`,
   )
   done(`pnl +${((row.usdcReceived - row.usdcSpent) / 1e6).toFixed(4)} USDC (stub)`)
+
+  done = step(
+    'round: allocation → entry → prediction (other human) → lock → trade → TP → resolve YES',
+  )
+  const alice = owner()
+  await api('POST', '/api/owners/verify', {
+    auth: await alice.auth(),
+    body: { proof: { devHuman: `${humanName}-alice` } },
+  })
+  const beta = await api('POST', '/api/agents', {
+    auth: await alice.auth(),
+    body: {
+      name: 'Beta',
+      mode: 'predict',
+      policy: { perTradeCap: '1', roundTradeCap: '1', dailyCap: '1' },
+    },
+  })
+  assert(beta.status === 201, `create Beta: ${JSON.stringify(beta.body)}`)
+  const poolAmount = parseUnits('10', 6)
+  for (const hash of [
+    await funder.sendTransaction({ to: beta.body.address as Address, value: parseEther('0.01') }),
+    await funder.sendTransaction({ to: bob.address, value: parseEther('0.01') }),
+    await funder.writeContract({
+      address: usdc,
+      abi: mockUsdcAbi,
+      functionName: 'mint',
+      args: [funder.account.address, poolAmount],
+    }),
+    await funder.writeContract({
+      address: usdc,
+      abi: mockUsdcAbi,
+      functionName: 'approve',
+      args: [arena, poolAmount],
+    }),
+    await funder.writeContract({
+      address: arena,
+      abi: arenaAbi,
+      functionName: 'fund',
+      args: [poolAmount],
+    }),
+  ]) {
+    assert(
+      (await publicClient.waitForTransactionReceipt({ hash })).status === 'success',
+      `setup tx ${hash}`,
+    )
+  }
+  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3000 } })
+  const tickRound = async () => (await api('POST', '/api/dev/rounds/tick')).body.acted
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const first = await api('POST', '/api/dev/rounds/tick')
+  assert(first.body.acted === 'started', `round started: ${JSON.stringify(first.body)}`)
+  const current = async () =>
+    (await api('GET', '/api/rounds/current')).body as {
+      id: number
+      epochId: number
+      phase: string
+      entries: {
+        id: number
+        trader: { id: string }
+        outcome: string
+        pnlBps: number
+        predictions: { yes: number }
+      }[]
+    }
+  let round = await current()
+  const entry = round.entries.find((e) => e.trader.id === agentId)
+  assert(entry, `Alpha entered round ${round.id}: ${JSON.stringify(round.entries)}`)
+  await pause(1100)
+  assert((await tickRound()) === 'REGISTRATION', '→ PREDICTING')
+  round = await current()
+  assert(
+    round.entries.find((e) => e.id === entry.id)!.predictions.yes === 1,
+    'Beta predicted YES on Alpha',
+  )
+  await pause(1100)
+  assert((await tickRound()) === 'PREDICTING', '→ TRADING')
+  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3100 } })
+  await pause(1600)
+  assert((await tickRound()) === 'TRADING', '→ RESOLVING → SETTLED')
+  round = await current()
+  const resolved = round.entries.find((e) => e.id === entry.id)!
+  assert(
+    round.phase === 'SETTLED' && resolved.outcome === 'YES' && resolved.pnlBps > 0,
+    `resolved: ${JSON.stringify(resolved)}`,
+  )
+  const detail = await api('GET', `/api/entries/${entry.id}`)
+  const decisions = detail.body.decisions as { model: string; requestId: string }[]
+  assert(
+    decisions.length >= 3 && decisions.every((d) => d.model === 'local-stub'),
+    'entry detail lists labeled decisions',
+  )
+  done(`round ${round.id}, entry ${entry.id} YES +${resolved.pnlBps} bps`)
+
+  done = step('epoch ends → awards published → owner claims onchain')
+  const epochEnd = (round.epochId + 1) * EPOCH_MS
+  await pause(Math.max(0, epochEnd - Date.now()) + 200)
+  await tickRound()
+  const epochs = (await api('GET', '/api/epochs')).body.epochs as {
+    id: number
+    status: string
+    awards: { ownerWallet: string; amount: number }[]
+  }[]
+  const epoch = epochs.find((e) => e.id === round.epochId)
+  assert(epoch?.status === 'published', `epoch published: ${JSON.stringify(epoch)}`)
+  const bobAward = epoch.awards.find((a) => a.ownerWallet === bob.address.toLowerCase())
+  assert(bobAward && bobAward.amount > 0, 'Bob earned a trader award')
+  const bobWallet = createWalletClient({
+    account: bob.account,
+    chain,
+    transport: http(rpcUrl),
+    pollingInterval,
+  })
+  const before = await usdcOf(bob.address)
+  const claimHash = await bobWallet.writeContract({
+    address: arena,
+    abi: arenaAbi,
+    functionName: 'claim',
+    args: [BigInt(round.epochId)],
+  })
+  assert(
+    (await publicClient.waitForTransactionReceipt({ hash: claimHash })).status === 'success',
+    'claim tx',
+  )
+  assert((await usdcOf(bob.address)) === before + BigInt(bobAward.amount), 'Bob received his award')
+  const board = (await api('GET', '/api/leaderboard')).body as {
+    traders: { agentId: string }[]
+    predictors: { agentId: string }[]
+  }
+  assert(board.traders[0]?.agentId === agentId, 'Alpha tops the trader leaderboard')
+  assert(
+    board.predictors.some((p) => p.agentId === beta.body.id),
+    'Beta on the predictor leaderboard',
+  )
+  done(`${bobAward.amount / 1e6} USDC claimed`)
 
   done = step('pause blocks the agent')
   await api('POST', `/api/agents/${agentId}/pause`, { auth })

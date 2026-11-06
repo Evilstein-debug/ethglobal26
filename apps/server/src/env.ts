@@ -71,6 +71,17 @@ export const env = {
   allowManualTrades: process.env.ALLOW_MANUAL_TRADES
     ? process.env.ALLOW_MANUAL_TRADES === 'true'
     : local,
+  rounds: {
+    enabled: (process.env.ROUNDS_ENABLED ?? 'true') === 'true',
+    registrationMs: Number(process.env.ROUND_REGISTRATION_MS) || 180_000,
+    predictingMs: Number(process.env.ROUND_PREDICTING_MS) || 240_000,
+    tradingMs: Number(process.env.ROUND_TRADING_MS) || 600_000,
+    gapMs: Number(process.env.ROUND_GAP_MS) || 0,
+    epochMs: Number(process.env.REWARD_EPOCH_MS) || 3_600_000,
+    epochBudget: Number(process.env.REWARD_EPOCH_BUDGET) || 5_000_000,
+    minEntries: Number(process.env.REWARD_MIN_ENTRIES) || 1,
+    minPredictions: Number(process.env.REWARD_MIN_PREDICTIONS) || 2,
+  },
   /**
    * How owners prove they're human. 'world' verifies IDKit proofs with World (Phase 6).
    * 'dev' accepts a made-up identity and is refused anywhere but local anvil.
