@@ -33,6 +33,17 @@ const intent = (over: Partial<EntryBundle['intents'][number]> = {}) => ({
   usdcReceived: 5_100_000,
   ...over,
 })
+const prediction = (over: Partial<EntryBundle['predictions'][number]> = {}) => ({
+  predictionId: 'p',
+  predictorKind: 'agent' as const,
+  predictorAddress: OWNER,
+  side: 'YES' as const,
+  probYesBps: 5000,
+  decisionId: null,
+  predictTx: tx(5),
+  brier: 0.25,
+  ...over,
+})
 const bundle = (over: Partial<EntryBundle> = {}): EntryBundle => ({
   entry: {
     id: 1,
@@ -41,7 +52,6 @@ const bundle = (over: Partial<EntryBundle> = {}): EntryBundle => ({
     outcome: 'YES',
     pnlBps: 200,
     voidReason: null,
-    allocationDecisionId: null,
     openTx: tx(9),
     resolveTx: tx(4),
   },
@@ -77,7 +87,7 @@ function chain(blocks: Record<string, number>, transfers: Transfer[]) {
         .map((t) => ({ args: t })),
   } as unknown as PublicClient
 }
-const BLOCKS = { [tx(9)]: 1, [tx(1)]: 2, [tx(2)]: 3, [tx(3)]: 4, [tx(4)]: 5, [tx(5)]: 3 }
+const BLOCKS = { [tx(1)]: 1, [tx(2)]: 2, [tx(9)]: 3, [tx(3)]: 4, [tx(4)]: 5, [tx(5)]: 3 }
 const TRADES: Transfer[] = [
   { from: AGENT, to: FLASH, value: 5_000_000n },
   { from: FLASH, to: AGENT, value: 5_100_000n },
@@ -115,6 +125,22 @@ test('fills: a commit after its fill fails, and a missing fill fails on Base', a
   assert.equal((await step(bundle(), chain(noFill, TRADES), 'commit-before-fill')).status, 'fail')
 })
 
+test('fills: a market broadcast before its fill fails', async () => {
+  const early = await step(bundle(), chain({ ...BLOCKS, [tx(9)]: 1 }, TRADES), 'commit-before-fill')
+  assert.equal(early.status, 'fail')
+  assert.match(early.detail, /market opened before fill/)
+})
+
+test('brier: a prediction landing once the exit filled must stay unscored', async () => {
+  const late = (brier: number | null) =>
+    bundle({ predictions: [prediction({ predictTx: tx(6), brier })] })
+  const c = chain({ ...BLOCKS, [tx(6)]: 4 }, TRADES)
+  assert.equal((await step(late(null), c, 'brier')).status, 'pass')
+  const scored = await step(late(0.25), c, 'brier')
+  assert.equal(scored.status, 'fail')
+  assert.match(scored.detail, /scored after the exit filled/)
+})
+
 test('fills: only local anvil may skip the fill steps', async () => {
   const onLocal = await step(bundle(), chain(BLOCKS, []), 'fills-onchain', LOCAL_CHAIN_ID)
   assert.equal(onLocal.status, 'skip')
@@ -124,7 +150,7 @@ test('fills: only local anvil may skip the fill steps', async () => {
 test('decisions: a stub or unverified model never passes on Base', async () => {
   const decision = {
     id: 'd',
-    kind: 'allocation' as const,
+    kind: 'think' as const,
     model: 'glm-5.3',
     requestId: 'r',
     provider: 'p',
@@ -136,7 +162,7 @@ test('decisions: a stub or unverified model never passes on Base', async () => {
   const b = (over: object) =>
     bundle({
       intents: [],
-      entry: { ...bundle().entry, allocationDecisionId: 'd' },
+      predictions: [prediction({ decisionId: 'd' })],
       decisions: [{ ...decision, ...over }],
     })
   const c = chain(BLOCKS, [])

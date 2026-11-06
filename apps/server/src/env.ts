@@ -80,12 +80,12 @@ export const env = {
     environment: (process.env.WORLD_ENVIRONMENT === 'staging' ? 'staging' : 'production') as
       'production' | 'staging',
   },
-  rounds: {
-    enabled: (process.env.ROUNDS_ENABLED ?? 'true') === 'true',
-    registrationMs: Number(process.env.ROUND_REGISTRATION_MS) || 180_000,
-    predictingMs: Number(process.env.ROUND_PREDICTING_MS) || 240_000,
-    tradingMs: Number(process.env.ROUND_TRADING_MS) || 600_000,
-    gapMs: Number(process.env.ROUND_GAP_MS) || 0,
+  markets: {
+    enabled: (process.env.AGENTS_ENABLED ?? 'true') === 'true',
+    predictionWindowMs: Number(process.env.PREDICTION_WINDOW_MS) || 300_000,
+    maxHoldMs: Number(process.env.TRADE_MAX_HOLD_MS) || 1_800_000,
+    cooldownMs: Number(process.env.TRADE_COOLDOWN_MS) || 300_000,
+    thinkEveryMs: Number(process.env.AGENT_THINK_MS) || 60_000,
     epochMs: Number(process.env.REWARD_EPOCH_MS) || 3_600_000,
     epochBudget: Number(process.env.REWARD_EPOCH_BUDGET) || 5_000_000,
     minEntries: Number(process.env.REWARD_MIN_ENTRIES) || 1,

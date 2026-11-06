@@ -1,5 +1,5 @@
 /**
- * Independent entry verification: re-derives one round entry from public data. Runs the same in
+ * Independent entry verification: re-derives one market's entry from public data. Runs the same in
  * the browser (entry page) and in scripts/verify.ts. The server only supplies the claims (the
  * `GET /api/entries/:id` bundle); every step checks them against Base logs, receipts and contract
  * state, and recomputes hashes, PnL and Brier scores locally.
@@ -28,7 +28,7 @@ import { USDC_DECIMALS } from './tokens'
 
 export type VerifyDecision = {
   id: string
-  kind: 'allocation' | 'trade' | 'prediction'
+  kind: 'think' | 'trade' | 'prediction'
   model: string
   requestId: string
   provider: string
@@ -46,7 +46,6 @@ export type EntryBundle = {
     outcome: 'PENDING' | 'YES' | 'NO' | 'VOID'
     pnlBps: number | null
     voidReason: string | null
-    allocationDecisionId: string | null
     openTx: string | null
     resolveTx: string | null
   }
@@ -94,6 +93,9 @@ export type VerifyOptions = {
   /** Independent TEE re-check (0G SDK, Node only). Without it the router's flag is reported. */
   verifyTee?: (d: VerifyDecision) => Promise<boolean>
 }
+
+/** A trade commits just before its market opens, so its logs sit a little before the open tx. */
+const COMMIT_LOOKBACK_BLOCKS = 1000n
 
 /** Onchain USDC net flow may differ from the fills we stored by rounding, at most this much. */
 export const FILL_TOLERANCE_BPS = 5
@@ -154,11 +156,12 @@ export async function verifyEntry(
   const committed = b.intents.filter((i) => i.commitTx)
   const executed = committed.filter((i) => i.state === 'EXECUTED' || i.state === 'CLOSED')
 
-  // The log window of this entry: from its openEntry tx to its resolution (or now).
+  // The log window of this entry: from just before its openEntry tx to its resolution (or now).
   const window = async () => {
     must(entry.openTx, 'entry has no open tx')
+    const open = (await receipt(entry.openTx)).blockNumber
     return {
-      fromBlock: (await receipt(entry.openTx)).blockNumber,
+      fromBlock: open > COMMIT_LOOKBACK_BLOCKS ? open - COMMIT_LOOKBACK_BLOCKS : 0n,
       toBlock: entry.resolveTx
         ? (await receipt(entry.resolveTx)).blockNumber
         : await client.getBlockNumber(),
@@ -206,7 +209,7 @@ export async function verifyEntry(
     return `#${entry.onchainEntryId}: ${OUTCOME[outcome]}${resolved ? `, ${pnlBps} bps` : ''}`
   })
 
-  await check('predictions-closed', 'Predictions closed before trading', async () => {
+  await check('predictions-closed', 'Predictions closed onchain', async () => {
     if (!round.lockTx) throw new Skip('predictions not locked yet')
     const lock = await lockPos()
     must(
@@ -274,7 +277,7 @@ export async function verifyEntry(
       logs.length === committed.length,
       `${logs.length} commit(s) onchain, ${committed.length} claimed`,
     )
-    const lock = committed.length ? await lockPos() : undefined
+    const open = committed.length ? await receipt(entry.openTx!) : undefined
     for (const i of committed) {
       must(
         canonicalHash(JSON.parse(i.canonicalJson)) === i.intentHash,
@@ -312,9 +315,9 @@ export async function verifyEntry(
         log.args.zeroGRequestIdHash === idHash(c.zeroG.requestId),
         `${i.intentId}: 0G request id hash differs from the onchain commit`,
       )
-      must(lock && before(lock, log), `${i.intentId}: committed before predictions locked`)
+      must(open && before(log, open), `${i.intentId}: market opened before the commit`)
     }
-    return `${logs.length} commit(s), hashes recomputed, all after the lock`
+    return `${logs.length} commit(s), hashes recomputed, all before the market opened`
   })
 
   await check('terminal', 'Every commit ended as executed or failed', async () => {
@@ -347,11 +350,12 @@ export async function verifyEntry(
       must(i.entryFillTx, `${i.intentId}: no entry fill`)
       const fill = await receipt(i.entryFillTx)
       must(before(await receipt(i.commitTx!), fill), `${i.intentId}: filled before its commit`)
+      must(before(fill, await receipt(entry.openTx!)), `${i.intentId}: market opened before fill`)
       if (i.state !== 'CLOSED') continue
       must(i.exitFillTx, `${i.intentId}: no exit fill`)
       must(before(fill, await receipt(i.exitFillTx)), `${i.intentId}: exit before entry`)
     }
-    return `${executed.length} fill(s) ordered after their commits`
+    return `${executed.length} fill(s) after their commits, before the market opened`
   })
 
   await check('fills-onchain', 'USDC moved onchain matches the fills', async () => {
@@ -398,8 +402,6 @@ export async function verifyEntry(
   await check('pnl', 'Outcome and PnL recomputed from fills', async () => {
     if (!resolved) throw new Skip('entry not resolved yet')
     const want = expectedOutcome(b.intents)
-    if (entry.outcome === 'VOID' && entry.voidReason === 'policy_changed')
-      return 'VOID: policy changed after the snapshot (operator-declared, not derivable from chain)'
     must(entry.outcome === want.outcome, `outcome ${entry.outcome}, recomputed ${want.outcome}`)
     if (entry.outcome === 'VOID') {
       must(entry.voidReason === want.voidReason, `void reason ${entry.voidReason}`)
@@ -411,7 +413,6 @@ export async function verifyEntry(
 
   await check('decisions', 'Every decision came from a sealed 0G model', async () => {
     const required = [
-      entry.allocationDecisionId,
       ...committed.map((i) => i.decisionId),
       ...b.predictions.filter((p) => p.predictorKind === 'agent').map((p) => p.decisionId),
     ]
@@ -445,10 +446,21 @@ export async function verifyEntry(
 
   await check('brier', 'Brier scores recomputed', async () => {
     if (!resolved) throw new Skip('entry not resolved yet')
+    // A prediction made once the exit had already filled saw the outcome: it can't be scored.
+    const exits = local ? [] : b.intents.flatMap((i) => (i.exitFillTx ? [i.exitFillTx] : []))
+    const exitBlocks = await Promise.all(exits.map(async (x) => (await receipt(x)).blockNumber))
     for (const p of b.predictions) {
       if (entry.outcome === 'VOID') {
         must(p.brier == null, `${p.predictionId}: scored on a VOID entry`)
         continue
+      }
+      if (exitBlocks.length) {
+        must(p.predictTx, `${p.predictionId}: no prediction tx`)
+        const at = (await receipt(p.predictTx)).blockNumber
+        if (exitBlocks.some((e) => at >= e)) {
+          must(p.brier == null, `${p.predictionId}: scored after the exit filled`)
+          continue
+        }
       }
       const y = entry.outcome === 'YES' ? 1 : 0
       const want = (p.probYesBps / 10_000 - y) ** 2

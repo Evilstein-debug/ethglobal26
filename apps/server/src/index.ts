@@ -162,22 +162,26 @@ const ctx: AppContext = {
   flash: flashSetup(),
   allowManualTrades: env.allowManualTrades,
   llm: llm(),
-  rounds: {
-    registrationMs: env.rounds.registrationMs,
-    predictingMs: env.rounds.predictingMs,
-    tradingMs: env.rounds.tradingMs,
-    gapMs: env.rounds.gapMs,
-    epochMs: env.rounds.epochMs,
+  markets: {
+    predictionWindowMs: env.markets.predictionWindowMs,
+    maxHoldMs: env.markets.maxHoldMs,
+    thinkEveryMs: env.markets.thinkEveryMs,
+    minGasWei: parseEther('0.00001'),
+    closeGraceMs: 300_000,
+    epochMs: env.markets.epochMs,
     epoch: {
-      budget: env.rounds.epochBudget,
-      minEntries: env.rounds.minEntries,
-      minPredictions: env.rounds.minPredictions,
+      budget: env.markets.epochBudget,
+      minEntries: env.markets.minEntries,
+      minPredictions: env.markets.minPredictions,
     },
-    maxTradeDecisions: 2,
   },
   devTools: env.isLocal,
   devFaucet: env.isLocal ? localFaucet() : undefined,
-  brain: { ...DEFAULT_BRAIN, minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct },
+  brain: {
+    ...DEFAULT_BRAIN,
+    minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct,
+    tradeCooldownMs: env.markets.cooldownMs,
+  },
   now: Date.now,
 }
 
@@ -189,12 +193,12 @@ createApp(ctx, env.corsOrigins).listen(env.port, (error) => {
 })
 
 startPredictionIndexer(ctx)
-if (env.rounds.enabled) {
-  startScheduler(ctx, ctx.rounds!)
-  const r = env.rounds
+if (env.markets.enabled) {
+  startScheduler(ctx, ctx.markets!)
+  const m = env.markets
   console.log(
-    `[server] rounds: ${r.registrationMs / 1000}s / ${r.predictingMs / 1000}s / ${r.tradingMs / 1000}s, epoch ${r.epochMs / 60000} min`,
+    `[server] agents think every ${m.thinkEveryMs / 1000}s; markets: ${m.predictionWindowMs / 1000}s to predict, ${m.maxHoldMs / 1000}s max hold, epoch ${m.epochMs / 60000} min`,
   )
 } else {
-  console.log('[server] round timer disabled (ROUNDS_ENABLED=false)')
+  console.log('[server] agent loop disabled (AGENTS_ENABLED=false)')
 }

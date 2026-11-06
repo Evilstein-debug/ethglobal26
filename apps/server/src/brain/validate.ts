@@ -31,53 +31,6 @@ const rationale = z
   .catch('')
   .transform((s) => s.slice(0, 500))
 
-// ── Allocation ──────────────────────────────────────────────────────────────────────────
-
-export const allocationOutput = z.object({
-  trade: z.boolean(),
-  tradeBudget: num.optional(),
-  rationale,
-})
-
-export type AllocationLimits = {
-  /** USDC base units. */
-  roundTradeCap: number
-  balance: number
-  minTrade: number
-}
-export type AllocationDecision = {
-  ok: true
-  trade: boolean
-  budget: number
-  clamped: boolean
-  rationale: string
-}
-
-export function validateAllocation(
-  raw: unknown,
-  limits: AllocationLimits,
-): AllocationDecision | Rejected {
-  const parsed = allocationOutput.safeParse(raw)
-  if (!parsed.success) return { ok: false, reason: 'invalid_schema' }
-  const { trade, tradeBudget, rationale: why } = parsed.data
-  if (!trade) return { ok: true, trade: false, budget: 0, clamped: false, rationale: why }
-  if (tradeBudget === undefined || !Number.isFinite(tradeBudget) || tradeBudget <= 0) {
-    return { ok: false, reason: 'invalid_budget' }
-  }
-  const asked = Math.floor(tradeBudget * 1e6)
-  const max = Math.min(limits.roundTradeCap, limits.balance)
-  const budget = Math.min(asked, max)
-  if (budget < limits.minTrade)
-    return {
-      ok: true,
-      trade: false,
-      budget: 0,
-      clamped: true,
-      rationale: `${why} [budget below minimum trade]`,
-    }
-  return { ok: true, trade: true, budget, clamped: budget !== asked, rationale: why }
-}
-
 // ── Trade ───────────────────────────────────────────────────────────────────────────────
 
 const tradeOutput = z.discriminatedUnion('action', [
@@ -229,4 +182,43 @@ export function validatePredictions(
     }
   }
   return { ok: true as const, accepted, rejected }
+}
+
+// ── The agent's choice ──────────────────────────────────────────────────────────────────
+
+const actionOutput = z.object({ action: z.string().toLowerCase(), rationale })
+
+export type ThinkDecision =
+  | { ok: true; action: 'wait'; rationale: string }
+  | Extract<TradeDecision, { action: 'buy' }>
+  | { ok: true; action: 'predict'; accepted: PredictionDecision[]; rejected: { reason: string }[] }
+
+/**
+ * The model picks its own action, but only among what's open to it right now: a buy when trading
+ * is blocked, or a prediction when nothing is on offer, is rejected here.
+ */
+export function validateThink(
+  raw: unknown,
+  opts: {
+    trade: TradeLimits | null
+    predict: { offered: Set<number>; maxCount: number } | null
+  },
+): ThinkDecision | Rejected {
+  const parsed = actionOutput.safeParse(raw)
+  if (!parsed.success) return { ok: false, reason: 'invalid_schema' }
+  const { action, rationale: why } = parsed.data
+  if (action === 'wait' || action === 'hold') return { ok: true, action: 'wait', rationale: why }
+  if (action === 'buy') {
+    if (!opts.trade) return { ok: false, reason: 'trade_not_available' }
+    const v = validateTrade(raw, opts.trade)
+    return v.ok && v.action === 'hold' ? { ok: true, action: 'wait', rationale: why } : v
+  }
+  if (action === 'predict') {
+    if (!opts.predict) return { ok: false, reason: 'predict_not_available' }
+    const v = validatePredictions(raw, opts.predict)
+    if (!v.ok) return v
+    if (!v.accepted.length) return { ok: false, reason: 'no_valid_predictions' }
+    return { ok: true, action: 'predict', accepted: v.accepted, rejected: v.rejected }
+  }
+  return { ok: false, reason: 'unknown_action' }
 }

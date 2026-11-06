@@ -1,21 +1,19 @@
 import assert from 'node:assert/strict'
 import type { AddressInfo } from 'node:net'
 import { after, describe, test } from 'node:test'
-import { LocalLLMStub } from '@starter/zerog'
 import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
 import { verifyEntry, type EntryBundle } from '@starter/shared/verify'
 import { eq } from 'drizzle-orm'
 import type { Address } from 'viem'
 import { createApp } from '../app'
 import { localModel } from '../brain/local-model'
-import { TRADE_SYSTEM } from '../brain/prompts'
 import { schema } from '../db'
 import { allocateAwards } from '../rewards/epoch'
-import { createAgent, updatePolicy } from '../services/agents'
+import { createAgent, setPaused, updatePolicy } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
 import { startPredictionIndexer } from './indexer'
 import { brier } from './resolver'
-import { tick, type RoundConfig } from './scheduler'
+import { tick, type MarketConfig } from './scheduler'
 
 test('brier score', () => {
   assert.equal(brier(10_000, 'YES'), 0)
@@ -48,15 +46,18 @@ test('awards: shares, one per human, ranking order', () => {
   assert.deepEqual(allocateAwards([r('a1', 'bob', 1)], [], 0), [])
 })
 
-const EPOCH = 10_000
-const cfg: RoundConfig = {
-  registrationMs: 1000,
-  predictingMs: 1000,
-  tradingMs: 1000,
-  gapMs: 0,
+const EPOCH = 100_000
+const WINDOW = 1000
+const HOLD = 5000
+const GRACE = 2000
+const cfg: MarketConfig = {
+  predictionWindowMs: WINDOW,
+  maxHoldMs: HOLD,
+  thinkEveryMs: 0,
+  minGasWei: 1n,
+  closeGraceMs: GRACE,
   epochMs: EPOCH,
   epoch: { budget: 5_000_000, minEntries: 1, minPredictions: 1 },
-  maxTradeDecisions: 2,
 }
 const policy = { perTradeCap: '5', dailyCap: '20', predictionsPerDay: 5 }
 
@@ -65,6 +66,8 @@ async function arena() {
   let clock = EPOCH * 100_000
   w.ctx.now = () => clock
   w.ctx.llm = localModel()
+  // Long enough that an agent makes one trade per test.
+  w.ctx.brain = { ...w.ctx.brain, tradeCooldownMs: EPOCH * 10 }
   const bob = await w.owner(`bob${Math.random().toString(36).slice(2, 8)}`)
   const alice = await w.owner(`alice${Math.random().toString(36).slice(2, 8)}`)
   const alpha = await createAgent(w.ctx, bob.wallet, { name: 'Alpha', mode: 'trade', policy })
@@ -75,6 +78,27 @@ async function arena() {
   await w.fundPool('10')
   return { ...w, bob, alice, alpha, beta, at: (t: number) => (clock = EPOCH * 100_000 + t) }
 }
+
+type World = Awaited<ReturnType<typeof arena>>
+
+/** Alpha buys, the market opens and is broadcast, Beta predicts. Clock left at t=100. */
+async function opened(w: World) {
+  await tick(w.ctx, cfg)
+  w.at(100)
+  await tick(w.ctx, cfg)
+  assert.equal((await w.db.select().from(schema.predictions)).length, 1, 'Beta predicted')
+}
+
+const market = async (w: World) => (await w.db.select().from(schema.rounds))[0]!
+const entry = async (w: World) => (await w.db.select().from(schema.roundEntries))[0]!
+const intent = async (w: World) => (await w.db.select().from(schema.intents))[0]!
+const locked = (w: World, id = 1n) =>
+  w.publicClient.readContract({
+    address: w.contracts.arena,
+    abi: arenaAbi,
+    functionName: 'roundLocked',
+    args: [id],
+  })
 
 /** The public entry bundle, exactly as a verifier gets it. */
 async function bundleOf(w: Awaited<ReturnType<typeof arena>>, entryId: number) {
@@ -92,55 +116,54 @@ async function verifiedOk(w: Awaited<ReturnType<typeof arena>>, entryId: number)
   assert.ok(report.ok, JSON.stringify(report.steps.filter((s) => s.status === 'fail')))
 }
 
-describe('rounds on anvil', { skip: skipReason }, () => {
-  test('full round → YES → Brier → epoch published → owner claims', async () => {
+describe('per-trade markets on anvil', { skip: skipReason }, () => {
+  test('buy → broadcast → predict → lock → exit → YES → Brier → epoch → claim', async () => {
     const w = await arena()
-    assert.equal(await tick(w.ctx, cfg), 'started')
-    const [entry] = await w.db.select().from(schema.roundEntries)
-    assert.ok(entry?.onchainEntryId, 'trader entered round 1 onchain')
-    assert.equal(entry!.tradeBudget, 5_000_000)
+    await tick(w.ctx, cfg) // Alpha decides and buys; the fill is broadcast
+    const [e] = await w.db.select().from(schema.roundEntries)
+    assert.ok(e?.onchainEntryId, 'market opened onchain right after the fill')
+    assert.equal(e!.tradeBudget, 5_000_000)
+    assert.equal((await intent(w)).entryId, e!.id)
+    assert.equal((await intent(w)).state, 'EXECUTED')
+    assert.equal((await market(w)).phase, 'PREDICTING')
+    const log = await w.db.select().from(schema.agentActivity)
+    assert.ok(log.some((a) => a.state === 'broadcast' && /make money/.test(a.message)))
 
-    w.at(1000)
-    assert.equal(await tick(w.ctx, cfg), 'REGISTRATION') // → PREDICTING, Beta predicts
+    w.at(100)
+    await tick(w.ctx, cfg) // Beta sees the broadcast and predicts
     assert.equal((await w.db.select().from(schema.predictions)).length, 1)
 
-    w.at(2000)
-    assert.equal(await tick(w.ctx, cfg), 'PREDICTING') // → lock + TRADING, Alpha trades
-    assert.equal(
-      await w.publicClient.readContract({
-        address: w.contracts.arena,
-        abi: arenaAbi,
-        functionName: 'roundLocked',
-        args: [1n],
-      }),
-      true,
-    )
-    const [intent] = await w.db.select().from(schema.intents)
-    assert.equal(intent!.state, 'EXECUTED')
+    w.at(WINDOW)
+    await tick(w.ctx, cfg) // window over: locked, position still open
+    assert.equal((await market(w)).phase, 'TRADING')
+    assert.equal(await locked(w), true)
+    assert.equal((await intent(w)).state, 'EXECUTED')
 
     w.stub.setPrice(3100) // take-profit (+1.5%) fires
-    w.at(3000)
-    assert.equal(await tick(w.ctx, cfg), 'TRADING') // → close, resolve, SETTLED
-    const [resolved] = await w.db.select().from(schema.roundEntries)
-    assert.equal(resolved!.outcome, 'YES')
-    assert.ok(resolved!.pnlBps! > 0)
+    w.at(WINDOW + 100)
+    await tick(w.ctx, cfg) // exit seen → resolve → SETTLED
+    assert.equal((await market(w)).phase, 'SETTLED')
+    const resolved = await entry(w)
+    assert.equal(resolved.outcome, 'YES')
+    assert.ok(resolved.pnlBps! > 0)
     const [, , onchainOutcome, onchainPnl] = await w.publicClient.readContract({
       address: w.contracts.arena,
       abi: arenaAbi,
       functionName: 'entries',
-      args: [BigInt(resolved!.onchainEntryId!)],
+      args: [BigInt(resolved.onchainEntryId!)],
     })
     assert.equal(onchainOutcome, 1)
-    assert.equal(onchainPnl, resolved!.pnlBps)
+    assert.equal(onchainPnl, resolved.pnlBps)
     const [pred] = await w.db.select().from(schema.predictions)
     assert.ok(Math.abs(pred!.brier! - 0.2025) < 1e-9)
     const stats = await w.db.select().from(schema.agentStats)
     assert.equal(stats.find((s) => s.role === 'trader')!.wins, 1)
     assert.equal(stats.find((s) => s.role === 'predictor')!.wins, 1)
+    await verifiedOk(w, resolved.id)
 
-    // Epoch ends → awards published before the next round starts.
+    // Epochs stay time-based and pay out from these markets.
     w.at(EPOCH)
-    assert.equal(await tick(w.ctx, cfg), 'started')
+    await tick(w.ctx, cfg)
     const awards = await w.db.select().from(schema.rewardAwards)
     assert.deepEqual(awards.map((a) => [a.category, a.amount]).sort(), [
       ['predictor', 1_000_000],
@@ -182,15 +205,194 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     stop()
   })
 
-  test('verifyEntry: an honest entry passes; each tampered claim fails its step', async () => {
+  test('trade exits inside the window: predictions lock at once and late ones are refused', async () => {
     const w = await arena()
     await tick(w.ctx, cfg)
-    w.at(1000)
+    w.stub.setPrice(3100)
+    w.at(100) // long before the window ends
     await tick(w.ctx, cfg)
-    w.at(2000)
+    assert.equal(await locked(w), true)
+    assert.equal((await market(w)).phase, 'SETTLED')
+    assert.equal((await entry(w)).outcome, 'YES')
+    const betaEntry = await entry(w)
+    const res = await w.publicClient
+      .simulateContract({
+        account: w.alice.account,
+        address: w.contracts.arena,
+        abi: arenaAbi,
+        functionName: 'predict',
+        args: [BigInt(betaEntry.onchainEntryId!), true, 9000, `0x${'0'.repeat(64)}`],
+      })
+      .then(
+        () => 'accepted',
+        (err: Error) => err.message,
+      )
+    assert.match(res, /RoundIsLocked/)
+  })
+
+  test('time limit: nothing fired, so the position is sold at market', async () => {
+    const w = await arena()
+    await opened(w)
+    w.at(HOLD - 1)
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'TRADING')
+    assert.equal((await intent(w)).state, 'EXECUTED')
+
+    w.stub.setPrice(3005)
+    w.at(HOLD)
+    await tick(w.ctx, cfg)
+    const i = await intent(w)
+    assert.equal(i.state, 'CLOSED')
+    assert.ok(i.flashCloseOrderId, 'sold by a market order, not a bracket leg')
+    assert.equal((await market(w)).phase, 'SETTLED')
+    assert.notEqual((await entry(w)).outcome, 'PENDING')
+    await verifiedOk(w, (await entry(w)).id)
+  })
+
+  test('a trade nobody predicted on still counts for the trader', async () => {
+    const w = await arena()
+    await w.db
+      .update(schema.agents)
+      .set({ status: 'paused' })
+      .where(eq(schema.agents.id, w.beta.id))
     await tick(w.ctx, cfg)
     w.stub.setPrice(3100)
-    w.at(3000)
+    w.at(100)
+    await tick(w.ctx, cfg)
+    assert.equal((await w.db.select().from(schema.predictions)).length, 0)
+    assert.equal((await entry(w)).outcome, 'YES')
+    const [stats] = await w.db.select().from(schema.agentStats)
+    assert.equal(stats!.wins, 1)
+  })
+
+  test('an order that fails after its commit is logged, refunds budget, and is never broadcast', async () => {
+    const w = await arena()
+    const submit = w.stub.submitOrder.bind(w.stub)
+    w.stub.submitOrder = async () => {
+      throw new Error('flash is down')
+    }
+    await tick(w.ctx, cfg)
+    w.stub.submitOrder = submit
+    const i = await intent(w)
+    assert.equal(i.state, 'FAILED')
+    assert.ok(i.commitTx && i.recordTx, 'the failure is onchain too')
+    assert.equal((await w.db.select().from(schema.roundEntries)).length, 0, 'no market')
+    assert.equal((await market(w)).phase, 'SETTLED')
+    const ledger = await w.db.select().from(schema.spendLedger)
+    assert.ok(ledger.every((l) => l.status === 'released'))
+    const states = (await w.db.select().from(schema.agentActivity)).map((a) => a.state)
+    assert.ok(!states.includes('broadcast'))
+  })
+
+  test('openEntry failing once does not lose the market: it retries', async () => {
+    const w = await arena()
+    const open = w.ctx.arena.openEntry
+    w.ctx.arena.openEntry = async () => {
+      throw new Error('rpc timeout')
+    }
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'OPENING')
+    w.ctx.arena.openEntry = open
+    w.at(100)
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'PREDICTING')
+    assert.ok((await entry(w)).openTx)
+  })
+
+  test('restart after openEntry landed but before it was saved: the market is recovered', async () => {
+    const w = await arena()
+    const open = w.ctx.arena.openEntry
+    let hash: string | null = null
+    w.ctx.arena.openEntry = async (id, trader) => {
+      const res = await open(id, trader)
+      hash = res.hash
+      throw new Error('crashed right after the tx')
+    }
+    await tick(w.ctx, cfg)
+    w.ctx.arena.openEntry = open
+    w.at(100)
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'PREDICTING')
+    assert.equal((await entry(w)).openTx, hash)
+  })
+
+  test('a reservation that never got a trade is cleared and blocks nothing', async () => {
+    const w = await arena()
+    await w.db.update(schema.agents).set({ status: 'paused' })
+    await w.db
+      .insert(schema.rounds)
+      .values({ id: 1, phase: 'OPENING', epochId: 1, startsAt: w.ctx.now(), phaseEndsAt: 0 })
+    w.at(GRACE + 1)
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'SETTLED')
+  })
+
+  test('pause during a trade: signing stays off, the entry voids after grace, resume cleans up', async () => {
+    const w = await arena()
+    await opened(w)
+    await setPaused(w.ctx, w.alpha.id, true)
+    w.at(HOLD)
+    await tick(w.ctx, cfg)
+    assert.equal(await locked(w), true, 'predictions lock regardless')
+    assert.equal((await intent(w)).state, 'EXECUTED', 'pause blocks the sale')
+    assert.equal((await market(w)).phase, 'TRADING')
+
+    w.at(HOLD + GRACE)
+    await tick(w.ctx, cfg)
+    assert.equal((await market(w)).phase, 'SETTLED')
+    const e = await entry(w)
+    assert.deepEqual([e.outcome, e.voidReason], ['VOID', 'unsettled_intent'])
+    const [pred] = await w.db.select().from(schema.predictions)
+    assert.equal(pred!.brier, null, 'void entries are not scored')
+
+    await setPaused(w.ctx, w.alpha.id, false)
+    await tick(w.ctx, cfg)
+    assert.equal((await intent(w)).state, 'CLOSED', 'leftover position sold after resume')
+  })
+
+  test('a bracket fires while paused: the exit is still seen and scored', async () => {
+    const w = await arena()
+    await opened(w)
+    await setPaused(w.ctx, w.alpha.id, true)
+    w.stub.setPrice(3100)
+    w.at(200)
+    await tick(w.ctx, cfg)
+    assert.equal((await entry(w)).outcome, 'YES')
+  })
+
+  test('changing limits during a trade does not void it', async () => {
+    const w = await arena()
+    await opened(w)
+    await updatePolicy(w.ctx, w.alpha.id, { ...policy, perTradeCap: '4' })
+    w.stub.setPrice(2900) // stop-loss fires: a loss can't be dodged by editing limits
+    w.at(200)
+    await tick(w.ctx, cfg)
+    const e = await entry(w)
+    assert.equal(e.outcome, 'NO')
+    await verifiedOk(w, e.id)
+  })
+
+  test('an epoch waits for its open markets', async () => {
+    const w = await arena()
+    w.ctx.brain = { ...w.ctx.brain, tradeCooldownMs: EPOCH * 10 }
+    const slow = { ...cfg, maxHoldMs: EPOCH * 2 }
+    await tick(w.ctx, slow)
+    await tick(w.ctx, slow)
+    const [epoch] = await w.db.select().from(schema.rewardEpochs).orderBy(schema.rewardEpochs.id)
+    assert.equal(epoch!.status, 'open', 'market still open')
+    w.stub.setPrice(3100)
+    w.at(EPOCH + 200)
+    await tick(w.ctx, slow)
+    assert.equal((await market(w)).phase, 'SETTLED')
+    const [settled] = await w.db.select().from(schema.rewardEpochs).orderBy(schema.rewardEpochs.id)
+    assert.equal(settled!.status, 'published')
+  })
+
+  test('verifyEntry: an honest entry passes; each tampered claim fails its step', async () => {
+    const w = await arena()
+    await opened(w)
+    w.stub.setPrice(3100)
+    w.at(WINDOW)
     await tick(w.ctx, cfg)
 
     const bundle = await bundleOf(w, 1)
@@ -258,58 +460,16 @@ describe('rounds on anvil', { skip: skipReason }, () => {
     )
   })
 
-  test('a trader that never trades is VOID; its predictions are not scored', async () => {
-    const w = await arena()
-    const model = localModel()
-    w.ctx.llm = new LocalLLMStub(async (req) =>
-      req.system === TRADE_SYSTEM
-        ? JSON.stringify({ action: 'hold', rationale: 'flat' })
-        : (await model.complete(req)).output,
-    )
-    for (const t of [0, 1000, 2000, 2600, 3000]) {
-      w.at(t)
-      await tick(w.ctx, cfg)
-    }
-    const [entry] = await w.db.select().from(schema.roundEntries)
-    assert.deepEqual([entry!.outcome, entry!.voidReason], ['VOID', 'no_trades'])
-    const [pred] = await w.db.select().from(schema.predictions)
-    assert.equal(pred!.brier, null)
-    // Two trade decisions were asked (start + mid-phase), both held.
-    const trades = (await w.db.select().from(schema.decisions)).filter((d) => d.kind === 'trade')
-    assert.equal(trades.length, 2)
-    await verifiedOk(w, entry!.id)
-  })
-
-  test('changing the policy mid-round voids the entry', async () => {
-    const w = await arena()
-    for (const t of [0, 1000, 2000]) {
-      w.at(t)
-      await tick(w.ctx, cfg)
-    }
-    await updatePolicy(w.ctx, w.alpha.id, { ...policy, perTradeCap: '4' })
-    w.at(3000)
-    await tick(w.ctx, cfg)
-    const [entry] = await w.db.select().from(schema.roundEntries)
-    assert.deepEqual([entry!.outcome, entry!.voidReason], ['VOID', 'policy_changed'])
-    // The position was still closed before resolution.
-    const [intent] = await w.db.select().from(schema.intents)
-    assert.equal(intent!.state, 'CLOSED')
-    await verifiedOk(w, entry!.id)
-  })
-
   test('a losing trade resolves NO and earns no trader award', async () => {
     const w = await arena()
-    for (const t of [0, 1000, 2000]) {
-      w.at(t)
-      await tick(w.ctx, cfg)
-    }
+    await opened(w)
     w.stub.setPrice(2900) // stop-loss fires
-    w.at(3000)
+    w.at(WINDOW)
     await tick(w.ctx, cfg)
-    const [entry] = await w.db.select().from(schema.roundEntries)
-    assert.equal(entry!.outcome, 'NO')
-    assert.ok(entry!.pnlBps! < 0)
-    await verifiedOk(w, entry!.id)
+    const e = await entry(w)
+    assert.equal(e.outcome, 'NO')
+    assert.ok(e.pnlBps! < 0)
+    await verifiedOk(w, e.id)
     w.at(EPOCH)
     await tick(w.ctx, cfg)
     const awards = await w.db.select().from(schema.rewardAwards)

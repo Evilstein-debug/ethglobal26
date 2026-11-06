@@ -1,5 +1,6 @@
-/** Public read API: rounds, entries, leaderboards, epochs, agent activity. No auth, no secrets. */
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+/** Public read API: markets, entries, leaderboards, epochs, agent activity. No auth, no secrets. */
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm'
+import type { TradeIntent } from '@starter/shared/schemas'
 import { Router, type Request } from 'express'
 import { getAddress } from 'viem'
 import type { AppContext } from '../context'
@@ -65,43 +66,139 @@ export function arenaRouter(ctx: AppContext) {
     }))
   }
 
-  async function roundView(round: typeof schema.rounds.$inferSelect) {
-    return { ...round, serverTime: ctx.now(), entries: await entriesOf(round.id) }
+  /** What the market is about: the trade itself, once it has filled. */
+  async function marketView(market: typeof schema.rounds.$inferSelect) {
+    const [trade] = await ctx.db
+      .select()
+      .from(schema.intents)
+      .where(eq(schema.intents.roundId, market.id))
+    return {
+      id: market.id,
+      phase: market.phase,
+      epochId: market.epochId,
+      openedAt: market.startsAt,
+      predictionsCloseAt: market.phaseEndsAt,
+      closesAt: market.closesAt,
+      lockTx: market.lockTx,
+      trade: trade && {
+        asset: trade.asset,
+        sizeUsdc: usdc(trade.sizeQuote),
+        entryPrice: trade.entryRefPrice,
+        targetPrice: trade.targetPrice,
+        stopPrice: trade.stopPrice,
+        state: trade.state,
+        rationale: (JSON.parse(trade.canonicalJson) as TradeIntent).rationale,
+      },
+      entries: await entriesOf(market.id),
+    }
   }
 
+  /** Markets people can act on, then the most recent finished ones. */
   r.get(
-    '/rounds/current',
+    '/markets',
     handler(async (_req, res) => {
-      const [round] = await ctx.db
+      const rows = await ctx.db
         .select()
         .from(schema.rounds)
+        .where(ne(schema.rounds.phase, 'SETTLED'))
         .orderBy(desc(schema.rounds.id))
-        .limit(1)
-      res.json(round ? await roundView(round) : { round: null, serverTime: ctx.now() })
+      const recent = await ctx.db
+        .select()
+        .from(schema.rounds)
+        .where(eq(schema.rounds.phase, 'SETTLED'))
+        .orderBy(desc(schema.rounds.id))
+        .limit(40)
+      const views = async (list: typeof rows) =>
+        (await Promise.all(list.map(marketView))).filter((m) => m.entries.length)
+      res.json({
+        serverTime: ctx.now(),
+        open: await views(rows),
+        recent: (await views(recent)).slice(0, 20),
+      })
     }),
   )
 
+  /** Each agent right now, plus what they've been doing. `?owner=` narrows it to one owner. */
   r.get(
-    '/rounds',
-    handler(async (_req, res) => {
-      const rounds = await ctx.db
-        .select()
-        .from(schema.rounds)
-        .orderBy(desc(schema.rounds.id))
-        .limit(50)
-      res.json({ rounds })
-    }),
-  )
-
-  r.get(
-    '/rounds/:id',
+    '/activity',
     handler(async (req: Request, res) => {
-      const [round] = await ctx.db
-        .select()
-        .from(schema.rounds)
-        .where(eq(schema.rounds.id, Number(req.params.id)))
-      if (!round) throw new HttpError(404, 'round_not_found')
-      res.json(await roundView(round))
+      const owner = typeof req.query.owner === 'string' ? req.query.owner.toLowerCase() : null
+      const mine = owner ? sql`a.owner_wallet = ${owner}` : sql`true`
+      const agents = await queryRows<{
+        id: string
+        name: string
+        mode: string
+        address: string
+        owner_wallet: string
+        status: string
+        state: string | null
+        detail: string | null
+        next_think_at: string | null
+        updated_at: string | null
+      }>(
+        ctx.db,
+        sql`select a.id, a.name, a.mode, a.address, a.owner_wallet, a.status,
+                   s.state, s.detail, s.next_think_at, s.updated_at
+            from agents a
+            left join agent_status s on s.agent_id = a.id
+            where ${mine}
+            order by a.created_at`,
+      )
+      const events = await queryRows<{
+        id: number
+        agent_id: string
+        agent_name: string
+        state: string
+        message: string
+        rationale: string | null
+        entry_id: number | null
+        created_at: string
+        request_id: string | null
+        tee_verified: boolean | null
+        accepted: boolean | null
+        reject_reason: string | null
+      }>(
+        ctx.db,
+        sql`select v.id, v.agent_id, a.name as agent_name, v.state, v.message, v.rationale,
+                   v.entry_id, v.created_at,
+                   d.request_id, d.tee_verified, d.accepted, d.reject_reason
+            from agent_activity v
+            join agents a on a.id = v.agent_id
+            left join decisions d on d.id = v.decision_id
+            where ${mine}
+            order by v.id desc
+            limit 100`,
+      )
+      res.json({
+        serverTime: ctx.now(),
+        agents: agents.map((a) => ({
+          id: a.id,
+          name: a.name,
+          mode: a.mode,
+          address: getAddress(a.address),
+          owner: getAddress(a.owner_wallet),
+          state: a.status === 'paused' ? 'paused' : (a.state ?? 'idle'),
+          detail: a.status === 'paused' ? 'Paused by its owner' : (a.detail ?? 'Starting up'),
+          nextThinkAt: a.status === 'paused' || !a.next_think_at ? null : Number(a.next_think_at),
+          updatedAt: a.updated_at == null ? null : Number(a.updated_at),
+        })),
+        events: events.map((e) => ({
+          id: e.id,
+          agentId: e.agent_id,
+          agentName: e.agent_name,
+          state: e.state,
+          message: e.message,
+          rationale: e.rationale,
+          entryId: e.entry_id,
+          at: Number(e.created_at),
+          decision: e.request_id && {
+            requestId: e.request_id,
+            teeVerified: e.tee_verified,
+            accepted: e.accepted,
+            rejectReason: e.reject_reason,
+          },
+        })),
+      })
     }),
   )
 
@@ -133,7 +230,6 @@ export function arenaRouter(ctx: AppContext) {
       const decisionIds = [
         ...intents.map((i) => i.decisionId),
         ...predictions.map((p) => p.decisionId),
-        entry.allocationDecisionId,
       ].filter((x): x is string => Boolean(x))
       const decisions = decisionIds.length
         ? await ctx.db

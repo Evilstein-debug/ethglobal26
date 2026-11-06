@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   parseModelJson,
-  validateAllocation,
   validatePredictions,
+  validateThink,
   validateTrade,
   type TradeLimits,
 } from './validate'
@@ -104,34 +104,39 @@ test('injection: hijacked trade outputs are rejected or clamped, never obeyed', 
   )
 })
 
-test('allocation: clamps to the round cap and wallet; too small means sit out', () => {
-  const lim = { roundTradeCap: 10_000_000, balance: 7_000_000, minTrade: 1_000_000 }
-  assert.deepEqual(validateAllocation({ trade: true, tradeBudget: 3, rationale: 'x' }, lim), {
+test('think: the model picks its action, but only from what is on offer', () => {
+  const buy = { action: 'buy', sizeQuote: 5, stopPrice: 2950, targetPrice: 3060, rationale: 'x' }
+  const predict = {
+    action: 'predict',
+    predictions: [{ entryId: 11, side: 'YES', probYesBps: 6000, rationale: 'x' }],
+  }
+  const open = { trade: limits, predict: { offered: new Set([11]), maxCount: 5 } }
+  const closed = { trade: null, predict: null }
+
+  assert.deepEqual(validateThink({ action: 'wait', rationale: 'flat' }, closed), {
     ok: true,
-    trade: true,
-    budget: 3_000_000,
-    clamped: false,
-    rationale: 'x',
+    action: 'wait',
+    rationale: 'flat',
   })
-  const big = validateAllocation({ trade: true, tradeBudget: 1e9, rationale: 'IGNORE LIMITS' }, lim)
-  assert.ok(big.ok && big.budget === 7_000_000 && big.clamped)
-  const tiny = validateAllocation({ trade: true, tradeBudget: 0.5 }, lim)
-  assert.ok(tiny.ok && tiny.trade === false)
-  assert.deepEqual(validateAllocation({ trade: false }, lim), {
-    ok: true,
-    trade: false,
-    budget: 0,
-    clamped: false,
-    rationale: '',
-  })
-  assert.deepEqual(validateAllocation({ trade: true }, lim), {
+  const bought = validateThink(buy, open)
+  assert.ok(bought.ok && bought.action === 'buy')
+  const predicted = validateThink(predict, open)
+  assert.ok(predicted.ok && predicted.action === 'predict' && predicted.accepted.length === 1)
+
+  assert.deepEqual(validateThink(buy, closed), { ok: false, reason: 'trade_not_available' })
+  assert.deepEqual(validateThink(predict, closed), { ok: false, reason: 'predict_not_available' })
+  assert.deepEqual(validateThink({ action: 'withdraw', to: '0xbad' }, open), {
     ok: false,
-    reason: 'invalid_budget',
+    reason: 'unknown_action',
   })
-  assert.deepEqual(validateAllocation({ trade: 'yes' }, lim), {
-    ok: false,
-    reason: 'invalid_schema',
-  })
+  assert.deepEqual(validateThink({ nonsense: true }, open), { ok: false, reason: 'invalid_schema' })
+  assert.deepEqual(
+    validateThink(
+      { action: 'predict', predictions: [{ entryId: 99, side: 'YES', probYesBps: 6000 }] },
+      open,
+    ),
+    { ok: false, reason: 'no_valid_predictions' },
+  )
 })
 
 test('predictions: only offered entries, consistent probabilities, limit and dedupe', () => {

@@ -1,9 +1,8 @@
 /**
- * The three decisions, each: gather data → ask the model (0G) → validate in code → record the
- * call in `decisions` (accepted or rejected, with the 0G trace) → act.
- *   - allocation (REGISTRATION): trade this round? with what budget?
- *   - trade (TRADING): long WETH with TP/SL, or hold → executeTrade
- *   - prediction (PREDICTING): YES/NO + probability per entry → Arena.predict
+ * One agent, one thought: gather everything the agent can see → ask the model (0G) what to do →
+ * validate in code → record the call in `decisions` (accepted or rejected, with the 0G trace) →
+ * act. The model chooses freely between buying, predicting and waiting; plain code decides what's
+ * on offer and enforces the limits. Every step lands in the agent's public activity feed.
  */
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -17,26 +16,22 @@ import { encodeFunctionData, getAddress, zeroHash, type Hash } from 'viem'
 import type { AppContext } from '../context'
 import { queryRows, schema } from '../db'
 import { executeTrade, newIntentId, type TradeResult } from '../execution/trade'
-import { authorizePrediction } from '../policy/authorize'
+import { authorizePrediction, authorizeTrade } from '../policy/authorize'
+import { reserveMarket, settleEmptyMarket, type MarketConfig } from '../rounds/scheduler'
+import { setStatus, type AgentState } from '../services/activity'
 import { agentSigner, balancesOf } from '../services/agents'
-import { ALLOCATION_SYSTEM, dataBlock, PREDICTION_SYSTEM, TRADE_SYSTEM } from './prompts'
-import {
-  parseModelJson,
-  validateAllocation,
-  validatePredictions,
-  validateTrade,
-  type PredictionDecision,
-} from './validate'
+import { dataBlock, THINK_SYSTEM } from './prompts'
+import { parseModelJson, validateThink, type PredictionDecision } from './validate'
 
 type AgentRow = typeof schema.agents.$inferSelect
-type Kind = 'allocation' | 'trade' | 'prediction'
+type Kind = 'think' | 'trade' | 'prediction'
+const DAY_MS = 86_400_000
 
 const HEADLINES = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../fixtures/headlines.json'), 'utf8'),
-) as {
-  label: string
-  items: string[]
-}
+) as { label: string; items: string[] }
+
+const readNews = async () => HEADLINES
 
 async function record(
   ctx: AppContext,
@@ -70,14 +65,7 @@ async function record(
 }
 
 /** Ask the model. A failed 0G call that still has a request ID is recorded as rejected. */
-async function ask(
-  ctx: AppContext,
-  agentId: string,
-  roundId: number,
-  kind: Kind,
-  system: string,
-  data: unknown,
-) {
+async function ask(ctx: AppContext, agentId: string, kind: Kind, system: string, data: unknown) {
   if (!ctx.llm) return { ok: false as const, reason: 'llm_not_configured' }
   try {
     const result = await ctx.llm.complete({ system, user: dataBlock(data) })
@@ -87,7 +75,7 @@ async function ask(
       await record(
         ctx,
         agentId,
-        roundId,
+        0,
         kind,
         { ...(err.trace as LLMResult), output: '' },
         false,
@@ -124,81 +112,177 @@ async function traderHistory(ctx: AppContext, agentId: string) {
     )
   return stats
     ? {
-        rounds: stats.rounds,
+        trades: stats.rounds,
         wins: stats.wins,
         losses: stats.losses,
         voids: stats.voids,
         pnlBpsTotal: stats.pnlBpsTotal,
       }
-    : { rounds: 0, wins: 0, losses: 0, voids: 0, pnlBpsTotal: 0 }
+    : { trades: 0, wins: 0, losses: 0, voids: 0, pnlBpsTotal: 0 }
 }
 
-// ── Allocation ──────────────────────────────────────────────────────────────────────────
-
-export async function decideAllocation(ctx: AppContext, agent: AgentRow, roundId: number) {
-  const policy = await policyOf(ctx, agent.id)
-  const { usdc } = await balancesOf(ctx, getAddress(agent.address))
-  const data = {
-    round: roundId,
-    balanceUsdc: Number(usdc) / 1e6,
-    limits: { roundTradeCap: policy.perTradeCap / 1e6, perTradeCap: policy.perTradeCap / 1e6 },
-    history: await traderHistory(ctx, agent.id),
-  }
-  const res = await ask(ctx, agent.id, roundId, 'allocation', ALLOCATION_SYSTEM, data)
-  if (!res.ok) return { trade: false as const, reason: res.reason }
-  const v = validateAllocation(res.parsed, {
-    roundTradeCap: policy.perTradeCap,
-    balance: Number(usdc),
-    minTrade: ctx.brain.minTrade,
-  })
-  const decisionId = await record(
-    ctx,
-    agent.id,
-    roundId,
-    'allocation',
-    res.result,
-    v.ok,
-    v.ok ? undefined : v.reason,
+/** Markets this agent may predict on: window open, another human's, not predicted yet. */
+async function openMarketsFor(ctx: AppContext, agent: AgentRow) {
+  const rows = await queryRows<{
+    id: number
+    round_id: number
+    onchain_entry_id: number
+    trader_agent_id: string
+    trader_name: string
+    entry_ref_price: string
+    stop_price: string
+    target_price: string
+    size_quote: string
+    phase_ends_at: string
+    closes_at: string | null
+  }>(
+    ctx.db,
+    sql`select e.id, e.round_id, e.onchain_entry_id, e.trader_agent_id, t.name as trader_name,
+               i.entry_ref_price, i.stop_price, i.target_price, i.size_quote,
+               r.phase_ends_at, r.closes_at
+        from round_entries e
+        join rounds r on r.id = e.round_id
+        join intents i on i.entry_id = e.id
+        join agents t on t.id = e.trader_agent_id
+        join owners o on o.wallet = t.owner_wallet
+        where r.phase = 'PREDICTING' and r.phase_ends_at > ${ctx.now()}
+          and e.outcome = 'PENDING' and e.onchain_entry_id is not null
+          and o.human_id <> (select o2.human_id from agents a2 join owners o2 on o2.wallet = a2.owner_wallet where a2.id = ${agent.id})
+          and not exists (select 1 from predictions p where p.entry_id = e.id and p.agent_id = ${agent.id})
+        order by e.id`,
   )
-  if (!v.ok) return { trade: false as const, reason: v.reason, decisionId }
-  return {
-    trade: v.trade,
-    budget: v.budget,
-    decisionId,
-    requestId: res.result.requestId,
-    rationale: v.rationale,
-  }
+  return Promise.all(
+    rows.map(async (e) => ({
+      local: e,
+      view: {
+        entryId: e.onchain_entry_id,
+        trader: e.trader_name,
+        asset: 'WETH',
+        entryPriceUsd: Number(e.entry_ref_price),
+        stopPriceUsd: Number(e.stop_price),
+        targetPriceUsd: Number(e.target_price),
+        sizeUsdc: Number(e.size_quote) / 1e6,
+        secondsLeftToPredict: Math.round((Number(e.phase_ends_at) - ctx.now()) / 1000),
+        history: await traderHistory(ctx, e.trader_agent_id),
+      },
+    })),
+  )
 }
 
-// ── Trade ───────────────────────────────────────────────────────────────────────────────
+async function openPosition(ctx: AppContext, agentId: string) {
+  const [i] = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(and(eq(schema.intents.agentId, agentId), eq(schema.intents.state, 'EXECUTED')))
+    .limit(1)
+  return (
+    i && {
+      asset: i.asset,
+      entryPriceUsd: Number(i.entryRefPrice),
+      stopPriceUsd: Number(i.stopPrice),
+      targetPriceUsd: Number(i.targetPrice),
+      sizeUsdc: i.sizeQuote / 1e6,
+    }
+  )
+}
 
-export type TradeDecisionResult =
-  | { action: 'hold'; decisionId: string }
-  | { action: 'rejected' | 'unavailable'; reason: string; decisionId?: string }
+const REFUSED: Record<string, string> = {
+  position_open: 'Already holding a position',
+  cooldown: 'Cooling down after its last trade',
+  over_daily_cap: 'Reached its daily spending limit',
+  insufficient_funds: 'Not enough USDC to trade',
+  paused: 'Paused by its owner',
+}
+
+export type ThinkResult =
+  | { action: 'skipped'; reason: string }
+  | { action: 'unavailable' | 'rejected'; reason: string; decisionId?: string }
+  | { action: 'wait'; decisionId: string }
   | { action: 'buy'; decisionId: string; trade: TradeResult }
+  | { action: 'predict'; decisionId: string; outcomes: PredictionOutcome[] }
 
-export async function decideTrade(
+/** Run one thought for an agent, and say when it should think again. */
+export async function think(
   ctx: AppContext,
   agent: AgentRow,
-  opts: { roundId: number; entryId: number | null; budget: number; roundEndsAt: number },
-): Promise<TradeDecisionResult> {
-  if (!ctx.flash) return { action: 'unavailable', reason: 'flash_not_configured' }
-  const [asset] = await ctx.flash.api.search('WETH', ctx.flash.chain, 1)
-  const livePrice = Number(asset?.price)
-  if (!(livePrice > 0)) return { action: 'unavailable', reason: 'price_unavailable' }
+  cfg: MarketConfig,
+): Promise<ThinkResult> {
+  const next = { nextThinkAt: ctx.now() + cfg.thinkEveryMs }
+  const stop = async (state: AgentState, detail: string): Promise<ThinkResult> => {
+    await setStatus(ctx, agent.id, state, detail, next)
+    return { action: 'skipped', reason: detail }
+  }
 
   const policy = await policyOf(ctx, agent.id)
+  const { usdc, eth } = await balancesOf(ctx, getAddress(agent.address))
+  if (eth < cfg.minGasWei) return stop('needs_funds', 'Needs ETH for gas before it can act')
+
+  const trader = agent.mode !== 'predict'
+  const predictor = agent.mode !== 'trade'
+  const b = ctx.brain
+
+  // What's open to the agent right now. The dry run applies every rule a real trade would.
+  const gate = trader
+    ? await authorizeTrade(
+        ctx.db,
+        { agentId: agent.id, roundId: 0, amount: b.minTrade, asset: 'WETH', ref: 'think' },
+        usdc,
+        ctx.now(),
+        { dryRun: true, cooldownMs: b.tradeCooldownMs },
+      )
+    : null
   const [spent] = await queryRows<{ total: string | null }>(
     ctx.db,
-    sql`select sum(amount) as total from spend_ledger where agent_id = ${agent.id} and round_id = ${opts.roundId} and status in ('reserved','settled')`,
+    sql`select sum(amount) as total from spend_ledger where agent_id = ${agent.id} and created_at >= ${ctx.now() - DAY_MS} and status in ('reserved','settled')`,
   )
-  const maxSize = Math.max(0, Math.min(policy.perTradeCap, opts.budget - Number(spent?.total ?? 0)))
-  const b = ctx.brain
+  const maxSize = Math.max(
+    0,
+    Math.min(policy.perTradeCap, policy.dailyCap - Number(spent?.total ?? 0), Number(usdc)),
+  )
+  const asset = trader && ctx.flash ? await ctx.flash.api.search('WETH', ctx.flash.chain, 1) : []
+  const livePrice = Number(asset[0]?.price)
+  const canTrade = Boolean(gate?.ok) && maxSize >= b.minTrade && livePrice > 0
+
+  const [made] = await queryRows<{ n: string }>(
+    ctx.db,
+    sql`select count(*) as n from predictions where agent_id = ${agent.id} and created_at >= ${ctx.now() - DAY_MS}`,
+  )
+  const maxPredictions = Math.max(0, policy.predictionsPerDay - Number(made?.n ?? 0))
+  const markets = predictor && maxPredictions > 0 ? await openMarketsFor(ctx, agent) : []
+  const canPredict = markets.length > 0
+
+  // Nothing it could do: don't spend a model call to find that out.
+  if (!canTrade && !canPredict) {
+    const reason = gate && !gate.ok ? gate.reason : undefined
+    if (reason === 'position_open') {
+      return stop('watching_position', 'Watching its open position')
+    }
+    if (reason === 'cooldown') return stop('cooling_down', REFUSED.cooldown!)
+    if (trader && reason === 'insufficient_funds') return stop('needs_funds', REFUSED[reason]!)
+    if (trader && maxSize < b.minTrade) return stop('idle', REFUSED.over_daily_cap!)
+    if (reason === 'paused') return stop('idle', REFUSED.paused!)
+    return stop('idle', 'No open markets to predict on')
+  }
+
+  const news = canTrade ? await readNews() : null
+  if (news) {
+    await setStatus(ctx, agent.id, 'reading_news', `Reading ${news.items.length} headlines`)
+  }
+  const options = [
+    canTrade && 'a trade',
+    canPredict && `${markets.length} open market${markets.length > 1 ? 's' : ''}`,
+  ].filter(Boolean)
+  await setStatus(ctx, agent.id, 'thinking', `Considering ${options.join(' and ')}`)
+
   const data = {
-    round: opts.roundId,
-    roundEndsAt: new Date(opts.roundEndsAt).toISOString(),
-    asset: 'WETH',
-    livePriceUsd: livePrice,
+    you: {
+      mode: agent.mode,
+      balanceUsdc: Number(usdc) / 1e6,
+      history: await traderHistory(ctx, agent.id),
+    },
+    position: (await openPosition(ctx, agent.id)) ?? null,
+    actions: { trade: canTrade, predict: canPredict },
+    market: { asset: 'WETH', livePriceUsd: livePrice || null },
     limits: {
       maxSizeUsdc: maxSize / 1e6,
       minRiskPct: b.minRiskPct,
@@ -206,31 +290,95 @@ export async function decideTrade(
       minTpPct: b.minTpPct,
       maxTpPct: b.maxTpPct,
       minRewardRisk: b.minRewardRisk,
+      maxHoldMinutes: cfg.maxHoldMs / 60_000,
+      maxPredictions,
     },
-    headlines: HEADLINES,
-    history: await traderHistory(ctx, agent.id),
+    news,
+    openMarkets: markets.map((m) => m.view),
   }
-  const res = await ask(ctx, agent.id, opts.roundId, 'trade', TRADE_SYSTEM, data)
-  if (!res.ok) return { action: 'unavailable', reason: res.reason }
-  const v = validateTrade(res.parsed, { livePrice, maxSize, ...b })
-  const decisionId = await record(
+  const res = await ask(ctx, agent.id, 'think', THINK_SYSTEM, data)
+  if (!res.ok) {
+    await setStatus(ctx, agent.id, 'error', `Model unavailable: ${res.reason}`, next)
+    return { action: 'unavailable', reason: res.reason }
+  }
+
+  const v = validateThink(res.parsed, {
+    trade: canTrade ? { livePrice, maxSize, ...b } : null,
+    predict: canPredict
+      ? { offered: new Set(markets.map((m) => m.view.entryId)), maxCount: maxPredictions }
+      : null,
+  })
+  if (!v.ok) {
+    const decisionId = await record(ctx, agent.id, 0, 'think', res.result, false, v.reason)
+    await setStatus(ctx, agent.id, 'idle', `Guardrails rejected its decision: ${v.reason}`, {
+      ...next,
+      decisionId,
+    })
+    return { action: 'rejected', reason: v.reason, decisionId }
+  }
+
+  if (v.action === 'wait') {
+    const decisionId = await record(ctx, agent.id, 0, 'think', res.result, true)
+    await setStatus(ctx, agent.id, 'idle', 'Decided to wait', {
+      ...next,
+      rationale: v.rationale,
+      decisionId,
+    })
+    return { action: 'wait', decisionId }
+  }
+
+  if (v.action === 'predict') {
+    const note = v.rejected.length
+      ? `items rejected: ${v.rejected.map((r) => r.reason).join(',')}`
+      : undefined
+    const decisionId = await record(ctx, agent.id, 0, 'prediction', res.result, true, note)
+    const outcomes: PredictionOutcome[] = []
+    for (const p of v.accepted) {
+      const local = markets.find((m) => m.view.entryId === p.entryId)!
+      await setStatus(
+        ctx,
+        agent.id,
+        'predicting',
+        `Predicting ${p.side} at ${p.probYesBps / 100}% on ${local.view.trader}'s trade`,
+        { rationale: p.rationale, decisionId, entryId: local.local.id },
+      )
+      outcomes.push(
+        await submitAgentPrediction(ctx, agent, {
+          roundId: local.local.round_id,
+          localEntryId: local.local.id,
+          decision: p,
+          requestId: res.result.requestId,
+          model: res.result.model,
+          decisionId,
+        }),
+      )
+    }
+    const sent = outcomes.filter((o) => o.status === 'submitted').length
+    await setStatus(
+      ctx,
+      agent.id,
+      'idle',
+      `Submitted ${sent} of ${outcomes.length} predictions`,
+      next,
+    )
+    return { action: 'predict', decisionId, outcomes }
+  }
+
+  const market = await reserveMarket(ctx, cfg)
+  const decisionId = await record(ctx, agent.id, market.id, 'trade', res.result, true)
+  await setStatus(
     ctx,
     agent.id,
-    opts.roundId,
-    'trade',
-    res.result,
-    v.ok,
-    v.ok ? undefined : v.reason,
+    'trading',
+    `Buying ${v.sizeQuote} USDC of WETH, target ${v.targetPrice}, stop ${v.stopPrice}`,
+    { rationale: v.rationale, decisionId },
   )
-  if (!v.ok) return { action: 'rejected', reason: v.reason, decisionId }
-  if (v.action === 'hold') return { action: 'hold', decisionId }
-
   const trade = await executeTrade(
     ctx,
     {
       version: 1,
       intentId: newIntentId(),
-      roundId: opts.roundId,
+      roundId: market.id,
       agentAddress: getAddress(agent.address),
       asset: 'WETH',
       side: 'long',
@@ -243,97 +391,24 @@ export async function decideTrade(
       zeroG: { requestId: res.result.requestId, model: res.result.model },
       createdAt: new Date(ctx.now()).toISOString(),
     },
-    { entryId: opts.entryId, decisionId },
+    { decisionId },
   )
+  if (trade.status === 'executed') {
+    // The market loop broadcasts it: there's one place that opens markets, so no double opens.
+    await setStatus(ctx, agent.id, 'watching_position', 'Watching its open position', next)
+  } else {
+    await settleEmptyMarket(ctx, market.id)
+    const why = trade.status === 'denied' ? trade.reason : `${trade.reason} (recorded onchain)`
+    await setStatus(ctx, agent.id, 'idle', `Trade did not go through: ${why}`, next)
+  }
   return { action: 'buy', decisionId, trade }
 }
-
-// ── Predictions ─────────────────────────────────────────────────────────────────────────
 
 export type PredictionOutcome = {
   entryId: number
   status: 'submitted' | 'denied' | 'failed'
   reason?: string
   tx?: Hash
-}
-
-export async function decidePredictions(ctx: AppContext, agent: AgentRow, roundId: number) {
-  const policy = await policyOf(ctx, agent.id)
-  // Offer only open entries of OTHER humans (the contract would revert on our own anyway).
-  const offered = await queryRows<{
-    id: number
-    onchain_entry_id: number
-    trader_agent_id: string
-    trader_name: string
-  }>(
-    ctx.db,
-    sql`select e.id, e.onchain_entry_id, e.trader_agent_id, t.name as trader_name
-        from round_entries e
-        join agents t on t.id = e.trader_agent_id
-        join owners o on o.wallet = t.owner_wallet
-        where e.round_id = ${roundId} and e.outcome = 'PENDING' and e.onchain_entry_id is not null
-          and o.human_id <> (select o2.human_id from agents a2 join owners o2 on o2.wallet = a2.owner_wallet where a2.id = ${agent.id})`,
-  )
-  const [made] = await queryRows<{ n: string }>(
-    ctx.db,
-    sql`select count(*) as n from predictions where agent_id = ${agent.id} and created_at >= ${ctx.now() - 86_400_000}`,
-  )
-  const maxCount = Math.max(0, policy.predictionsPerDay - Number(made?.n ?? 0))
-  if (offered.length === 0 || maxCount === 0)
-    return {
-      decisionId: undefined,
-      outcomes: [] as PredictionOutcome[],
-      reason: 'nothing_to_predict',
-    }
-
-  const entries = await Promise.all(
-    offered.map(async (e) => ({
-      entryId: e.onchain_entry_id,
-      trader: e.trader_name,
-      history: await traderHistory(ctx, e.trader_agent_id),
-    })),
-  )
-  const res = await ask(ctx, agent.id, roundId, 'prediction', PREDICTION_SYSTEM, {
-    round: roundId,
-    entries,
-    limits: { maxPredictions: maxCount },
-  })
-  if (!res.ok) return { decisionId: undefined, outcomes: [], reason: res.reason }
-  const v = validatePredictions(res.parsed, {
-    offered: new Set(offered.map((e) => e.onchain_entry_id)),
-    maxCount,
-  })
-  const rejectNote = v.ok
-    ? v.rejected.length
-      ? `items rejected: ${v.rejected.map((r) => r.reason).join(',')}`
-      : undefined
-    : v.reason
-  const decisionId = await record(
-    ctx,
-    agent.id,
-    roundId,
-    'prediction',
-    res.result,
-    v.ok,
-    rejectNote,
-  )
-  if (!v.ok) return { decisionId, outcomes: [], reason: v.reason }
-
-  const outcomes: PredictionOutcome[] = []
-  for (const p of v.accepted) {
-    const local = offered.find((e) => e.onchain_entry_id === p.entryId)!
-    outcomes.push(
-      await submitAgentPrediction(ctx, agent, {
-        roundId,
-        localEntryId: local.id,
-        decision: p,
-        requestId: res.result.requestId,
-        model: res.result.model,
-        decisionId,
-      }),
-    )
-  }
-  return { decisionId, outcomes }
 }
 
 /** Gate, sign Arena.predict from the agent wallet, then store the canonical prediction. */

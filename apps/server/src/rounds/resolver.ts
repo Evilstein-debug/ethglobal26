@@ -1,13 +1,15 @@
 /**
- * Resolve a round's entries from their committed intents (never from agent self-reports):
+ * Resolve a market's entry from its committed intents (never from agent self-reports):
  *   realized PnL = Σ(usdc_received − usdc_spent) over CLOSED intents of the entry
  *   PnL > 0 → YES; PnL ≤ 0 → NO;
- *   VOID if: no executed trade, the policy changed since the snapshot, or any intent is unsettled
- *   (still open/executing, or a close failed) — a resolution we can't stand behind.
+ *   VOID if: no executed trade, or any intent is unsettled (still open/executing, or a close
+ *   failed) — a resolution we can't stand behind. A limit change after the trade changes nothing:
+ *   the limits are enforced when the trade is made.
  * Then Arena.resolveEntry, Brier scores for every prediction, and agent_stats.
  */
 import { canonicalHash } from '@starter/shared/canonical'
 import { and, eq, sql } from 'drizzle-orm'
+import type { Hash } from 'viem'
 import type { AppContext } from '../context'
 import { schema } from '../db'
 
@@ -44,13 +46,6 @@ export async function computeEntryOutcome(
     .select()
     .from(schema.intents)
     .where(eq(schema.intents.entryId, entry.id))
-  const [policy] = await ctx.db
-    .select()
-    .from(schema.policies)
-    .where(eq(schema.policies.agentId, entry.traderAgentId))
-  if (!policy || policySnapshot(policy).hash !== entry.policySnapshotHash) {
-    return { outcome: 'VOID' as const, pnlBps: 0, voidReason: 'policy_changed' }
-  }
   const unsettled = intents.filter((i) =>
     ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED'].includes(i.state),
   )
@@ -108,6 +103,24 @@ async function bumpStats(
     })
 }
 
+/**
+ * Flash fills onchain before we see them, so a prediction can land between the fill and our lock.
+ * Those guessed with the outcome already public: they stay onchain but are never scored.
+ */
+async function landedAfterExit(ctx: AppContext, entryId: number) {
+  if (ctx.flash?.api.kind !== 'flash') return () => Promise.resolve(false)
+  const exits = await ctx.db
+    .select({ tx: schema.intents.exitFillTx })
+    .from(schema.intents)
+    .where(eq(schema.intents.entryId, entryId))
+  const block = async (hash: string) =>
+    (await ctx.publicClient.getTransactionReceipt({ hash: hash as Hash })).blockNumber
+  const fills = await Promise.all(exits.flatMap((e) => (e.tx ? [block(e.tx)] : [])))
+  if (!fills.length) return () => Promise.resolve(false)
+  const first = fills.reduce((a, b) => (a < b ? a : b))
+  return async (predictTx: string | null) => predictTx != null && (await block(predictTx)) >= first
+}
+
 /** Resolve every pending entry of a round. Safe to re-run: resolved entries are skipped. */
 export async function resolveRound(ctx: AppContext, roundId: number): Promise<EntryResolution[]> {
   const entries = await ctx.db
@@ -149,7 +162,9 @@ export async function resolveRound(ctx: AppContext, roundId: number): Promise<En
       .select()
       .from(schema.predictions)
       .where(eq(schema.predictions.entryId, entry.id))
+    const late = await landedAfterExit(ctx, entry.id)
     for (const p of preds) {
+      if (await late(p.predictTx)) continue
       if (r.outcome === 'VOID') {
         if (p.agentId) await bumpStats(ctx, p.agentId, 'predictor', { rounds: 1, voids: 1 })
         continue

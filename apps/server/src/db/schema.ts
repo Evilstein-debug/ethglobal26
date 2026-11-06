@@ -99,18 +99,26 @@ export const spendLedger = pgTable(
   (t) => [index('spend_agent_idx').on(t.agentId, t.status)],
 )
 
+/**
+ * One market per trade ("round" onchain and in the intent schema): OPENING while the trade is in
+ * flight, PREDICTING while predictions are open, TRADING once they're locked and the position is
+ * still open, then RESOLVING and SETTLED. Keeps its reward epoch from the moment it was created.
+ */
 export const rounds = pgTable('rounds', {
   id: integer('id').primaryKey(),
   phase: text('phase', {
-    enum: ['REGISTRATION', 'PREDICTING', 'TRADING', 'RESOLVING', 'SETTLED'],
+    enum: ['OPENING', 'PREDICTING', 'TRADING', 'RESOLVING', 'SETTLED'],
   }).notNull(),
   epochId: integer('epoch_id').notNull(),
   startsAt: num('starts_at').notNull(),
+  /** PREDICTING: when the prediction window ends. */
   phaseEndsAt: num('phase_ends_at').notNull(),
+  /** When the time limit sells the position if neither bracket leg fired. */
+  closesAt: num('closes_at'),
   lockTx: text('lock_tx'),
 })
 
-/** A trader agent opted into a round. Predictions target entries. */
+/** A trade broadcast as a market: predictions target entries. */
 export const roundEntries = pgTable(
   'round_entries',
   {
@@ -122,7 +130,7 @@ export const roundEntries = pgTable(
       .notNull()
       .references(() => agents.id),
     onchainEntryId: integer('onchain_entry_id').unique(),
-    /** Policy snapshot taken at REGISTRATION; a mismatch at resolution voids the entry. */
+    /** The policy the trade was made under, for the record. Later edits don't affect it. */
     policySnapshot: text('policy_snapshot').notNull(),
     policySnapshotHash: text('policy_snapshot_hash').notNull(),
     tradeBudget: num('trade_budget').notNull(),
@@ -131,7 +139,6 @@ export const roundEntries = pgTable(
       .default('PENDING'),
     pnlBps: integer('pnl_bps'),
     voidReason: text('void_reason'),
-    allocationDecisionId: text('allocation_decision_id').references(() => decisions.id),
     openTx: text('open_tx'),
     resolveTx: text('resolve_tx'),
   },
@@ -208,7 +215,7 @@ export const decisions = pgTable(
       .notNull()
       .references(() => agents.id),
     roundId: integer('round_id').notNull(),
-    kind: text('kind', { enum: ['allocation', 'trade', 'prediction'] }).notNull(),
+    kind: text('kind', { enum: ['think', 'trade', 'prediction'] }).notNull(),
     model: text('model').notNull(),
     /** x_0g_trace.request_id */
     requestId: text('request_id').notNull().unique(),
@@ -224,6 +231,48 @@ export const decisions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('decisions_agent_round_idx').on(t.agentId, t.roundId)],
+)
+
+export const AGENT_STATES = [
+  'idle',
+  'reading_news',
+  'thinking',
+  'trading',
+  'predicting',
+  'watching_position',
+  'cooling_down',
+  'needs_funds',
+  'error',
+] as const
+
+/** What each agent is doing right now, and when it next thinks. */
+export const agentStatus = pgTable('agent_status', {
+  agentId: text('agent_id')
+    .primaryKey()
+    .references(() => agents.id),
+  state: text('state', { enum: AGENT_STATES }).notNull(),
+  detail: text('detail').notNull(),
+  nextThinkAt: num('next_think_at').notNull(),
+  updatedAt: num('updated_at').notNull(),
+})
+
+/** Public log of everything agents do, for the Live tab. Stores no secrets. */
+export const agentActivity = pgTable(
+  'agent_activity',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    state: text('state', { enum: [...AGENT_STATES, 'broadcast', 'resolved'] }).notNull(),
+    message: text('message').notNull(),
+    /** The model's own words, when this step came from a decision. */
+    rationale: text('rationale'),
+    decisionId: text('decision_id').references(() => decisions.id),
+    entryId: integer('entry_id').references(() => roundEntries.id),
+    createdAt: num('created_at').notNull(),
+  },
+  (t) => [index('activity_created_idx').on(t.createdAt)],
 )
 
 export const agentStats = pgTable(

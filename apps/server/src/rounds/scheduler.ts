@@ -1,50 +1,54 @@
 /**
- * Round state machine, driven by the `rounds` table so a restart resumes where it stopped:
+ * Two independent loops. There is no shared round: every trade is its own market.
  *
- *   REGISTRATION → PREDICTING → TRADING → RESOLVING → SETTLED
+ * Agents: each active agent thinks on its own schedule (brain/decide.ts) and chooses to buy,
+ * predict or wait. A broadcast wakes predictors immediately.
  *
- * - enter REGISTRATION: allocation decision per trade/both agent; opting-in traders get an
- *   onchain entry (Arena.openEntry) with a policy snapshot and budget.
- * - enter PREDICTING: prediction decisions per predict/both agent.
- * - enter TRADING: Arena.lockPredictions (late predictions revert onchain), then a trade decision
- *   per entry; entries that held get one more decision at mid-phase.
- * - end of TRADING: close every open position, resolve every entry, settle finished epochs.
+ * Markets: one per trade, driven by the `rounds` table so a restart resumes where it stopped:
  *
- * `tick()` performs whatever transition is due at ctx.now(); the timer just calls it.
+ *   OPENING → PREDICTING → TRADING → RESOLVING → SETTLED
+ *
+ * - OPENING: the trade is in flight. A market is only broadcast after a confirmed fill, so a
+ *   failed order never reaches predictors.
+ * - PREDICTING: open for `predictionWindowMs`, or until the position closes if that comes first.
+ * - TRADING: predictions locked onchain, position still open.
+ * - The position ends at its take-profit, its stop-loss, or is sold at `maxHoldMs`. Then the entry
+ *   resolves from fills and predictions are scored.
+ *
+ * Reward epochs stay time-based: a market belongs to the epoch it opened in, and an epoch pays out
+ * once all its markets have settled.
  */
 import { and, desc, eq, inArray, lte, ne, sql } from 'drizzle-orm'
-import { getAddress } from 'viem'
+import { arenaAbi } from '@starter/shared/generated'
+import { getAddress, type Address } from 'viem'
+import { think } from '../brain/decide'
 import type { AppContext } from '../context'
 import { queryRows, schema } from '../db'
-import { decideAllocation, decidePredictions, decideTrade } from '../brain/decide'
-import { closePosition } from '../execution/close'
+import { closePosition, syncExit } from '../execution/close'
+import { recoverStuckIntents } from '../execution/trade'
 import { settleEpoch, type EpochConfig } from '../rewards/epoch'
+import { logActivity, setStatus, wakeAgent } from '../services/activity'
 import { policySnapshot, resolveRound } from './resolver'
 
-export type RoundConfig = {
-  registrationMs: number
-  predictingMs: number
-  tradingMs: number
-  /** Pause between a settled round and the next one. */
-  gapMs: number
+export type MarketConfig = {
+  predictionWindowMs: number
+  maxHoldMs: number
+  /** How often an agent with nothing urgent thinks. */
+  thinkEveryMs: number
+  /** Below this ETH balance an agent can't send anything, so it doesn't try. */
+  minGasWei: bigint
+  /** How long a failing close is retried before the entry goes VOID so epochs can pay out. */
+  closeGraceMs: number
   epochMs: number
   epoch: EpochConfig
-  /** Max trade decisions per entry per round. */
-  maxTradeDecisions: number
 }
 
-type Round = typeof schema.rounds.$inferSelect
+type Market = typeof schema.rounds.$inferSelect
 
-const log = (...args: unknown[]) => console.log('[rounds]', ...args)
+const log = (...args: unknown[]) => console.log('[markets]', ...args)
 
-async function activeAgents(ctx: AppContext, modes: ('trade' | 'predict' | 'both')[]) {
-  return ctx.db
-    .select()
-    .from(schema.agents)
-    .where(and(eq(schema.agents.status, 'active'), inArray(schema.agents.mode, modes)))
-}
-
-async function ensureEpoch(ctx: AppContext, epochId: number, cfg: RoundConfig) {
+async function ensureEpoch(ctx: AppContext, cfg: MarketConfig) {
+  const epochId = Math.floor(ctx.now() / cfg.epochMs)
   await ctx.db
     .insert(schema.rewardEpochs)
     .values({
@@ -54,142 +58,243 @@ async function ensureEpoch(ctx: AppContext, epochId: number, cfg: RoundConfig) {
       budget: cfg.epoch.budget,
     })
     .onConflictDoNothing()
+  return epochId
 }
 
-export async function startRound(ctx: AppContext, cfg: RoundConfig): Promise<Round> {
-  const now = ctx.now()
+/** A market id for a trade about to happen: the intent commits to it before anything is sent. */
+export async function reserveMarket(ctx: AppContext, cfg: MarketConfig): Promise<Market> {
   const [last] = await ctx.db.select().from(schema.rounds).orderBy(desc(schema.rounds.id)).limit(1)
-  const id = (last?.id ?? 0) + 1
-  const epochId = Math.floor(now / cfg.epochMs)
-  await ensureEpoch(ctx, epochId, cfg)
-  const [round] = await ctx.db
+  const now = ctx.now()
+  const [market] = await ctx.db
     .insert(schema.rounds)
     .values({
-      id,
-      phase: 'REGISTRATION',
-      epochId,
+      id: (last?.id ?? 0) + 1,
+      phase: 'OPENING',
+      epochId: await ensureEpoch(ctx, cfg),
       startsAt: now,
-      phaseEndsAt: now + cfg.registrationMs,
+      phaseEndsAt: now,
     })
     .returning()
-  log(`round ${id} REGISTRATION`)
+  return market!
+}
 
-  for (const agent of await activeAgents(ctx, ['trade', 'both'])) {
-    const alloc = await decideAllocation(ctx, agent, id)
-    if (!alloc.trade || !('budget' in alloc) || !alloc.budget) continue
-    const [policy] = await ctx.db
+async function setPhase(ctx: AppContext, id: number, fields: Partial<Market>) {
+  await ctx.db.update(schema.rounds).set(fields).where(eq(schema.rounds.id, id))
+  if (fields.phase) log(`market ${id} ${fields.phase}`)
+}
+
+/** The trade never happened, so there's nothing to predict on. */
+export const settleEmptyMarket = (ctx: AppContext, id: number) =>
+  setPhase(ctx, id, { phase: 'SETTLED' })
+
+/** openEntry, unless a previous attempt got it onchain but stopped before saving it. */
+async function openOnchain(ctx: AppContext, marketId: number, trader: Address) {
+  const address = ctx.contracts.arena
+  const existing = await ctx.publicClient.readContract({
+    address,
+    abi: arenaAbi,
+    functionName: 'entryOf',
+    args: [BigInt(marketId), trader],
+  })
+  if (existing === 0n) return ctx.arena.openEntry(marketId, trader)
+  const latest = await ctx.publicClient.getBlockNumber()
+  const [log] = await ctx.publicClient.getContractEvents({
+    address,
+    abi: arenaAbi,
+    eventName: 'EntryOpened',
+    args: { entryId: existing },
+    fromBlock: latest > 2000n ? latest - 2000n : 0n,
+  })
+  return { hash: log?.transactionHash ?? null, entryId: Number(existing) }
+}
+
+/**
+ * The broadcast: the filled trade becomes a public onchain market and every predictor that could
+ * act on it is woken. Safe to retry: a failed openEntry leaves the market in OPENING.
+ */
+async function broadcastMarket(
+  ctx: AppContext,
+  cfg: MarketConfig,
+  marketId: number,
+  agent: typeof schema.agents.$inferSelect,
+) {
+  const [intent] = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(eq(schema.intents.roundId, marketId))
+  const [policy] = await ctx.db
+    .select()
+    .from(schema.policies)
+    .where(eq(schema.policies.agentId, agent.id))
+  if (!intent || !policy) throw new Error(`market ${marketId} has no trade`)
+  const snap = policySnapshot(policy)
+  const { hash, entryId } = await openOnchain(ctx, marketId, getAddress(agent.address))
+  const [entry] = await ctx.db
+    .insert(schema.roundEntries)
+    .values({
+      roundId: marketId,
+      traderAgentId: agent.id,
+      onchainEntryId: entryId,
+      policySnapshot: snap.json,
+      policySnapshotHash: snap.hash,
+      tradeBudget: intent.sizeQuote,
+      openTx: hash,
+    })
+    .returning()
+  await ctx.db
+    .update(schema.intents)
+    .set({ entryId: entry!.id })
+    .where(eq(schema.intents.intentId, intent.intentId))
+  const now = ctx.now()
+  await setPhase(ctx, marketId, {
+    phase: 'PREDICTING',
+    phaseEndsAt: now + cfg.predictionWindowMs,
+    closesAt: now + cfg.maxHoldMs,
+  })
+  await logActivity(
+    ctx,
+    agent.id,
+    'broadcast',
+    `${agent.name} bought ${intent.sizeQuote / 1e6} USDC of ${intent.asset}. Will this trade make money?`,
+    { entryId: entry!.id, decisionId: intent.decisionId ?? undefined },
+  )
+  const predictors = await ctx.db
+    .select({ id: schema.agents.id })
+    .from(schema.agents)
+    .where(
+      and(eq(schema.agents.status, 'active'), inArray(schema.agents.mode, ['predict', 'both'])),
+    )
+  for (const p of predictors) if (p.id !== agent.id) await wakeAgent(ctx, p.id)
+}
+
+async function stepOpening(ctx: AppContext, cfg: MarketConfig, market: Market) {
+  const [intent] = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(eq(schema.intents.roundId, market.id))
+  if (intent?.state === 'FAILED') return settleEmptyMarket(ctx, market.id)
+  if (!intent) {
+    // Reserved, then the server stopped before the intent was written.
+    if (ctx.now() - market.startsAt > cfg.closeGraceMs) await settleEmptyMarket(ctx, market.id)
+    return
+  }
+  if (intent.state !== 'EXECUTED' && intent.state !== 'CLOSED') return
+  const [agent] = await ctx.db
+    .select()
+    .from(schema.agents)
+    .where(eq(schema.agents.id, intent.agentId))
+  if (agent) await broadcastMarket(ctx, cfg, market.id, agent)
+}
+
+async function resolveMarket(ctx: AppContext, market: Market) {
+  await setPhase(ctx, market.id, { phase: 'RESOLVING' })
+  for (const r of await resolveRound(ctx, market.id)) {
+    log(`market ${market.id} resolved: ${r.outcome} ${r.pnlBps} bps`)
+    const [entry] = await ctx.db
       .select()
-      .from(schema.policies)
-      .where(eq(schema.policies.agentId, agent.id))
-    if (!policy || policy.paused) continue
-    const snap = policySnapshot(policy)
-    try {
-      const { hash, entryId } = await ctx.arena.openEntry(id, getAddress(agent.address))
-      await ctx.db.insert(schema.roundEntries).values({
-        roundId: id,
-        traderAgentId: agent.id,
-        onchainEntryId: entryId,
-        policySnapshot: snap.json,
-        policySnapshotHash: snap.hash,
-        tradeBudget: alloc.budget,
-        allocationDecisionId: alloc.decisionId,
-        openTx: hash,
-      })
-    } catch (err) {
-      console.error(`[rounds] openEntry failed for ${agent.id}:`, err)
+      .from(schema.roundEntries)
+      .where(eq(schema.roundEntries.id, r.entryId))
+    const text =
+      r.outcome === 'VOID'
+        ? `Trade voided: ${r.voidReason?.replaceAll('_', ' ')}`
+        : `Trade closed ${r.outcome === 'YES' ? 'in profit' : 'at a loss'}: ${(r.pnlBps / 100).toFixed(2)}%`
+    if (entry) {
+      await logActivity(ctx, entry.traderAgentId, 'resolved', text, { entryId: entry.id })
+      await wakeAgent(ctx, entry.traderAgentId)
     }
   }
-  return round!
-}
-
-async function setPhase(
-  ctx: AppContext,
-  round: Round,
-  phase: Round['phase'],
-  durationMs: number,
-  extra: Partial<Round> = {},
-) {
-  await ctx.db
-    .update(schema.rounds)
-    .set({ phase, phaseEndsAt: ctx.now() + durationMs, ...extra })
-    .where(eq(schema.rounds.id, round.id))
-  log(`round ${round.id} ${phase}`)
-}
-
-async function enterPredicting(ctx: AppContext, round: Round, cfg: RoundConfig) {
-  await setPhase(ctx, round, 'PREDICTING', cfg.predictingMs)
-  for (const agent of await activeAgents(ctx, ['predict', 'both'])) {
-    await decidePredictions(ctx, agent, round.id)
-  }
-}
-
-async function tradeDecisionsFor(
-  ctx: AppContext,
-  round: Round,
-  cfg: RoundConfig,
-  onlyIdle: boolean,
-) {
-  const entries = await ctx.db
-    .select()
+  const [pending] = await ctx.db
+    .select({ id: schema.roundEntries.id })
     .from(schema.roundEntries)
-    .where(eq(schema.roundEntries.roundId, round.id))
-  for (const entry of entries) {
-    const [counts] = await queryRows<{ decisions: string; live: string }>(
-      ctx.db,
-      sql`select
-            (select count(*) from decisions where agent_id = ${entry.traderAgentId} and round_id = ${round.id} and kind = 'trade') as decisions,
-            (select count(*) from intents where entry_id = ${entry.id} and state in ('EXECUTED','CLOSED','EXECUTING','COMMITTED')) as live`,
+    .where(
+      and(eq(schema.roundEntries.roundId, market.id), eq(schema.roundEntries.outcome, 'PENDING')),
     )
-    if (Number(counts?.decisions ?? 0) >= cfg.maxTradeDecisions) continue
-    if (onlyIdle && Number(counts?.live ?? 0) > 0) continue
-    const [agent] = await ctx.db
-      .select()
-      .from(schema.agents)
-      .where(eq(schema.agents.id, entry.traderAgentId))
-    if (!agent || agent.status !== 'active') continue
-    const res = await decideTrade(ctx, agent, {
-      roundId: round.id,
-      entryId: entry.id,
-      budget: entry.tradeBudget,
-      roundEndsAt: round.startsAt + cfg.registrationMs + cfg.predictingMs + cfg.tradingMs,
-    })
-    log(
-      `round ${round.id} entry ${entry.id}: ${res.action}${'reason' in res ? ` (${res.reason})` : ''}`,
-    )
-  }
+  // An onchain failure leaves it pending: stay in RESOLVING and retry on the next tick.
+  if (!pending) await setPhase(ctx, market.id, { phase: 'SETTLED' })
 }
 
-async function enterTrading(ctx: AppContext, round: Round, cfg: RoundConfig) {
-  const lockTx = await ctx.arena.lockPredictions(round.id)
-  await setPhase(ctx, round, 'TRADING', cfg.tradingMs, { lockTx })
-  await tradeDecisionsFor(ctx, round, cfg, false)
+async function stepOpen(ctx: AppContext, cfg: MarketConfig, market: Market) {
+  const now = ctx.now()
+  const closesAt = market.closesAt ?? now
+  const openIntents = () =>
+    ctx.db
+      .select({ id: schema.intents.intentId })
+      .from(schema.intents)
+      .where(and(eq(schema.intents.roundId, market.id), eq(schema.intents.state, 'EXECUTED')))
+
+  for (const { id } of await openIntents()) {
+    // Flash being down or the agent being paused must never hold up the lock below.
+    try {
+      await syncExit(ctx, id)
+      if (now >= closesAt) {
+        const closed = await closePosition(ctx, id)
+        log(`market ${market.id} time limit: ${closed.status}`)
+      }
+    } catch (err) {
+      console.error(`[markets] market ${market.id} exit failed; will retry:`, err)
+    }
+  }
+  const stillOpen = (await openIntents()).length > 0
+  const giveUp = now >= closesAt + cfg.closeGraceMs
+
+  // Predictions close the moment the outcome is known, never after it.
+  if (
+    market.phase === 'PREDICTING' &&
+    (now >= market.phaseEndsAt || !stillOpen || now >= closesAt)
+  ) {
+    const lockTx = await ctx.arena.lockPredictions(market.id)
+    await setPhase(ctx, market.id, { phase: 'TRADING', lockTx })
+    if (!stillOpen || giveUp) await resolveMarket(ctx, { ...market, phase: 'TRADING', lockTx })
+    return
+  }
+  if (market.phase === 'RESOLVING' || !stillOpen || giveUp) await resolveMarket(ctx, market)
 }
 
-async function finishRound(ctx: AppContext, round: Round, cfg: RoundConfig) {
-  await setPhase(ctx, round, 'RESOLVING', 0)
-  const open = await ctx.db
-    .select({ intentId: schema.intents.intentId })
-    .from(schema.intents)
-    .where(and(eq(schema.intents.roundId, round.id), eq(schema.intents.state, 'EXECUTED')))
-  for (const { intentId } of open) {
-    const closed = await closePosition(ctx, intentId)
-    log(`round ${round.id} close ${intentId}: ${closed.status}`)
-  }
-  const results = await resolveRound(ctx, round.id)
-  log(
-    `round ${round.id} resolved: ${results.map((r) => `${r.entryId}=${r.outcome}`).join(' ') || 'no entries'}`,
+/** A voided market can leave a position behind, e.g. the agent was paused. Finish it when we can. */
+async function sweepOrphans(ctx: AppContext) {
+  const rows = await queryRows<{ intent_id: string }>(
+    ctx.db,
+    sql`select i.intent_id from intents i
+        join rounds r on r.id = i.round_id
+        join agents a on a.id = i.agent_id
+        where i.state = 'EXECUTED' and r.phase = 'SETTLED' and a.status = 'active'`,
   )
-  await setPhase(ctx, round, 'SETTLED', 0)
-  await settleDueEpochs(ctx, cfg)
+  for (const { intent_id } of rows) {
+    await closePosition(ctx, intent_id).catch((err) =>
+      console.error(`[markets] leftover ${intent_id} failed to close:`, err),
+    )
+  }
 }
 
-export async function settleDueEpochs(ctx: AppContext, cfg: RoundConfig) {
+/** Advance every open market, then pay out finished epochs. Returns how many it looked at. */
+export async function tickMarkets(ctx: AppContext, cfg: MarketConfig) {
+  await ensureEpoch(ctx, cfg)
+  await recoverStuckIntents(ctx)
+  const open = await ctx.db
+    .select()
+    .from(schema.rounds)
+    .where(ne(schema.rounds.phase, 'SETTLED'))
+    .orderBy(schema.rounds.id)
+  for (const market of open) {
+    try {
+      if (market.phase === 'OPENING') await stepOpening(ctx, cfg, market)
+      else await stepOpen(ctx, cfg, market)
+    } catch (err) {
+      console.error(`[markets] market ${market.id} failed; will retry:`, err)
+    }
+  }
+  await sweepOrphans(ctx)
+  await settleDueEpochs(ctx, cfg)
+  return open.length
+}
+
+export async function settleDueEpochs(ctx: AppContext, cfg: MarketConfig) {
   const due = await ctx.db
     .select()
     .from(schema.rewardEpochs)
     .where(and(eq(schema.rewardEpochs.status, 'open'), lte(schema.rewardEpochs.endsAt, ctx.now())))
   for (const epoch of due) {
-    // Every round of the epoch must be settled first.
+    // Every market of the epoch must be settled first.
     const [pending] = await ctx.db
       .select({ id: schema.rounds.id })
       .from(schema.rounds)
@@ -200,55 +305,59 @@ export async function settleDueEpochs(ctx: AppContext, cfg: RoundConfig) {
       const res = await settleEpoch(ctx, epoch.id, cfg.epoch)
       log(`epoch ${epoch.id}: ${res.status}`)
     } catch (err) {
-      console.error(`[rounds] epoch ${epoch.id} settle failed; will retry:`, err)
+      console.error(`[markets] epoch ${epoch.id} settle failed; will retry:`, err)
     }
   }
 }
 
-/** Do whatever is due now. Returns the phase it acted on (for logs and tests). */
-export async function tick(ctx: AppContext, cfg: RoundConfig): Promise<string> {
-  const now = ctx.now()
-  const [round] = await ctx.db.select().from(schema.rounds).orderBy(desc(schema.rounds.id)).limit(1)
-  if (!round || round.phase === 'SETTLED') {
-    // Finished epochs pay out before the next round can start a new one.
-    if (round) await settleDueEpochs(ctx, cfg)
-    if (!round || now >= round.phaseEndsAt + cfg.gapMs) {
-      await startRound(ctx, cfg)
-      return 'started'
-    }
-    return 'idle'
-  }
-  if (
-    round.phase === 'TRADING' &&
-    now < round.phaseEndsAt &&
-    now >= round.phaseEndsAt - cfg.tradingMs / 2
-  ) {
-    await tradeDecisionsFor(ctx, round, cfg, true) // second chance for entries that held
-  }
-  if (now < round.phaseEndsAt) return 'waiting'
-  if (round.phase === 'REGISTRATION') await enterPredicting(ctx, round, cfg)
-  else if (round.phase === 'PREDICTING') await enterTrading(ctx, round, cfg)
-  else await finishRound(ctx, round, cfg) // TRADING or a crashed RESOLVING
-  return round.phase
-}
-
-/** Run tick() on an interval, never overlapping. Returns a stop function. */
-export function startScheduler(ctx: AppContext, cfg: RoundConfig, everyMs = 2000) {
-  let running = false
-  let stopped = false
-  const timer = setInterval(async () => {
-    if (running || stopped) return
-    running = true
+/** Let every agent that's due think, one at a time. Returns how many thought. */
+export async function tickAgents(ctx: AppContext, cfg: MarketConfig) {
+  const agents = await ctx.db.select().from(schema.agents).where(eq(schema.agents.status, 'active'))
+  const schedule = await ctx.db.select().from(schema.agentStatus)
+  let thought = 0
+  for (const agent of agents) {
+    const due = schedule.find((s) => s.agentId === agent.id)?.nextThinkAt ?? 0
+    if (ctx.now() < due) continue
+    thought++
     try {
-      await tick(ctx, cfg)
+      const res = await think(ctx, agent, cfg)
+      log(`${agent.name}: ${res.action}${'reason' in res ? ` (${res.reason})` : ''}`)
     } catch (err) {
-      console.error('[rounds] tick failed:', err)
-    } finally {
-      running = false
+      console.error(`[agents] ${agent.id} failed to think:`, err)
+      const detail = err instanceof Error ? err.message : String(err)
+      await setStatus(ctx, agent.id, 'error', detail, {
+        nextThinkAt: ctx.now() + cfg.thinkEveryMs,
+      })
     }
-  }, everyMs)
-  return () => {
-    stopped = true
-    clearInterval(timer)
   }
+  return thought
+}
+
+/** One pass of everything that's due (tests and local tooling). */
+export async function tick(ctx: AppContext, cfg: MarketConfig) {
+  const thought = await tickAgents(ctx, cfg)
+  return { thought, markets: await tickMarkets(ctx, cfg) }
+}
+
+/** Run both loops on an interval. Slow thinking never delays a market. Returns a stop function. */
+export function startScheduler(ctx: AppContext, cfg: MarketConfig, everyMs = 2000) {
+  const loop = (name: string, step: () => Promise<unknown>) => {
+    let running = false
+    return setInterval(async () => {
+      if (running) return
+      running = true
+      try {
+        await step()
+      } catch (err) {
+        console.error(`[${name}] tick failed:`, err)
+      } finally {
+        running = false
+      }
+    }, everyMs)
+  }
+  const timers = [
+    loop('markets', () => tickMarkets(ctx, cfg)),
+    loop('agents', () => tickAgents(ctx, cfg)),
+  ]
+  return () => timers.forEach(clearInterval)
 }

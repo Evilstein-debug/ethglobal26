@@ -123,13 +123,13 @@ export function tradesRouter(ctx: AppContext) {
     )
   }
 
-  /** LOCAL TEST ONLY: run one scheduler tick now (used by e2e with the timer disabled). */
-  if (ctx.devTools && ctx.rounds) {
-    const rounds = ctx.rounds
+  /** LOCAL TEST ONLY: run one scheduler pass now (used by e2e with the timer disabled). */
+  if (ctx.devTools && ctx.markets) {
+    const markets = ctx.markets
     r.post(
-      '/dev/rounds/tick',
+      '/dev/tick',
       handler(async (_req, res) => {
-        res.json({ acted: await tick(ctx, rounds) })
+        res.json(await tick(ctx, markets))
       }),
     )
   }
