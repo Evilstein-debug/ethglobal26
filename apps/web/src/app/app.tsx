@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { zeroHash } from 'viem'
 import { useAccount } from 'wagmi'
+import { DevPriceControls } from '@/components/dev-tools'
 import { TxStatus } from '@/components/tx-status'
 import { Badge, Button, Empty, Panel } from '@/components/ui'
 import { useApi, useHealth } from '@/lib/api'
@@ -122,6 +123,7 @@ export function App() {
           )}
         </div>
         <p className="text-sm text-muted">{PHASE_HELP[round.phase ?? ''] ?? ''}</p>
+        <DevPriceControls />
       </Panel>
 
       <section className="grid gap-px border border-line bg-line md:grid-cols-2">

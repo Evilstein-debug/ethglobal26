@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import { useState } from 'react'
 import { erc20Abi, parseUnits } from 'viem'
 import { useAccount } from 'wagmi'
+import { DevAgentFunds } from '@/components/dev-tools'
 import { TxStatus } from '@/components/tx-status'
 import { Badge, Button, Empty, Field, Panel } from '@/components/ui'
 import { api, errorText, useApi, useHealth, useOwnerAuth } from '@/lib/api'
@@ -120,6 +121,7 @@ function OwnerControls({ agent }: { agent: AgentView }) {
           )}
         </div>
       </div>
+      <DevAgentFunds address={agent.address} />
       {msg && <p className="text-sm">{msg}</p>}
     </Panel>
   )
