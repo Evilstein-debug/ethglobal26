@@ -112,6 +112,11 @@ test('missing request id, empty output and HTTP errors are typed errors', async 
     [200, { ...ok, x_0g_trace: {} }, 'no_request_id'],
     [200, { ...ok, choices: [] }, 'empty_output'],
     [
+      200,
+      { ...ok, choices: [{ message: { content: '' }, finish_reason: 'length' }] },
+      'output_truncated',
+    ],
+    [
       503,
       {
         error: {

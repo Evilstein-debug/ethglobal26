@@ -326,6 +326,62 @@ describe('the agent decides for itself, on anvil', { skip: skipReason }, () => {
     assert.equal((await statusOf(w, w.trader.id)).state, 'error')
   })
 
+  test('a reply cut off while reasoning is retried once, asking for a brief answer', async () => {
+    const trace = {
+      requestId: 'req-cut',
+      provider: '0xprov',
+      model: 'glm-5.3',
+      teeVerified: true,
+      chatId: null,
+      latencyMs: 5,
+    }
+    const users: string[] = []
+    const cutOnce: LLMClient = {
+      kind: '0g',
+      model: 'glm-5.3',
+      async complete(req) {
+        users.push(req.user)
+        if (users.length === 1)
+          throw new ZeroGError('output_truncated', 'used all tokens reasoning', 200, trace)
+        return {
+          ...trace,
+          requestId: 'req-ok',
+          output: '{"thought":"quiet market","action":"wait"}',
+        }
+      },
+    }
+    const w = await world(cutOnce)
+    const res = await think(w.ctx, w.trader, cfg)
+    assert.equal(users.length, 2, 'retried exactly once')
+    assert.match(users[1]!, /reply with the JSON now/)
+    assert.notEqual(res.action, 'unavailable')
+    const rows = await w.db.select().from(schema.decisions)
+    assert.ok(rows.some((d) => d.requestId === 'req-cut' && d.rejectReason === 'output_truncated'))
+  })
+
+  test('a reply cut off twice gives up with the reason', async () => {
+    let n = 0
+    const alwaysCut: LLMClient = {
+      kind: '0g',
+      model: 'glm-5.3',
+      async complete() {
+        n++
+        throw new ZeroGError('output_truncated', 'used all tokens reasoning', 200, {
+          requestId: `req-cut-${n}`,
+          provider: '0xprov',
+          model: 'glm-5.3',
+          teeVerified: true,
+          chatId: null,
+          latencyMs: 5,
+        })
+      },
+    }
+    const w = await world(alwaysCut)
+    const res = await think(w.ctx, w.trader, cfg)
+    assert.deepEqual(res, { action: 'unavailable', reason: 'output_truncated' })
+    assert.equal(n, 2)
+  })
+
   test('predictions: submitted onchain for other humans only', async () => {
     const w = await world()
     const entry = await broadcast(w)

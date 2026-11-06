@@ -72,7 +72,7 @@ export type ZeroGClientOptions = {
 type ChatResponse = {
   id?: string
   model?: string
-  choices?: { message?: { content?: string | null } }[]
+  choices?: { message?: { content?: string | null }; finish_reason?: string | null }[]
   x_0g_trace?: { request_id?: string; provider?: string; tee_verified?: boolean | null }
   error?: { message?: string; code?: string }
 }
@@ -167,6 +167,14 @@ export class ZeroGClient implements LLMClient {
       )
     }
     const output = body?.choices?.[0]?.message?.content ?? ''
+    // Reasoning models (glm-5.3) spend tokens thinking first; hitting max_tokens there leaves no answer.
+    if (!output && body?.choices?.[0]?.finish_reason === 'length')
+      throw new ZeroGError(
+        'output_truncated',
+        `used all ${req.maxTokens ?? 800} tokens reasoning before answering`,
+        res.status,
+        trace,
+      )
     if (!output) throw new ZeroGError('empty_output', 'no message content', res.status, trace)
     return { ...trace, output }
   }

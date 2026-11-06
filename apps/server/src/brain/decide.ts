@@ -58,7 +58,16 @@ async function record(
   return id
 }
 
-/** Ask the model. A failed 0G call that still has a request ID is recorded as rejected. */
+/** Room for a reasoning model to think and still answer (~50 tokens/s, inside the 0G timeout). */
+const MAX_TOKENS = 6000
+const ANSWER_NOW =
+  '\n\nYour previous attempt at this step used its whole budget thinking and gave no answer. ' +
+  'Keep your reasoning to a few sentences and reply with the JSON now.'
+
+/**
+ * Ask the model. A failed 0G call that still has a request ID is recorded as rejected. A reply cut
+ * off while the model was still reasoning is retried once, asking it to answer briefly.
+ */
 async function ask(
   ctx: AppContext,
   agentId: string,
@@ -69,30 +78,33 @@ async function ask(
   extra = '',
 ) {
   if (!ctx.llm) return { ok: false as const, reason: 'llm_not_configured' }
-  try {
-    const result = await ctx.llm.complete({
-      system,
-      user: dataBlock(data) + extra,
-      maxTokens: 4000,
-    })
-    return { ok: true as const, result, parsed: parseModelJson(result.output) }
-  } catch (err) {
-    if (err instanceof ZeroGError && err.trace?.requestId) {
-      await record(
-        ctx,
-        agentId,
-        0,
-        kind,
-        { ...(err.trace as LLMResult), output: '' },
-        false,
-        err.code,
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await ctx.llm.complete({
+        system,
+        user: dataBlock(data) + extra + (attempt > 0 ? ANSWER_NOW : ''),
+        maxTokens: MAX_TOKENS,
+      })
+      return { ok: true as const, result, parsed: parseModelJson(result.output) }
+    } catch (err) {
+      if (err instanceof ZeroGError && err.trace?.requestId) {
+        await record(
+          ctx,
+          agentId,
+          0,
+          kind,
+          { ...(err.trace as LLMResult), output: '' },
+          false,
+          err.code,
+        )
+      }
+      console.warn(
+        `[brain] ${kind} call failed for ${agentId}:`,
+        err instanceof Error ? err.message : err,
       )
+      if (err instanceof ZeroGError && err.code === 'output_truncated' && attempt === 0) continue
+      return { ok: false as const, reason: err instanceof ZeroGError ? err.code : 'llm_error' }
     }
-    console.warn(
-      `[brain] ${kind} call failed for ${agentId}:`,
-      err instanceof Error ? err.message : err,
-    )
-    return { ok: false as const, reason: err instanceof ZeroGError ? err.code : 'llm_error' }
   }
 }
 
