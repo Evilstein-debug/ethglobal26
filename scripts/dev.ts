@@ -7,7 +7,14 @@
  * For a testnet, use `pnpm dev:testnet` with each app's .env pointing at it.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { deployLocal, ensureAnvil, LOCAL_RPC_URL, ROOT, seedLocal } from './lib/local'
+import {
+  deployLocal,
+  ensureAnvil,
+  LOCAL_RPC_URL,
+  LOCAL_SERVER_ENV,
+  ROOT,
+  seedLocal,
+} from './lib/local'
 
 const children: ChildProcess[] = []
 
@@ -50,7 +57,7 @@ try {
   shutdown(1)
 }
 
-startApp('server', '@starter/server', { CHAIN_ID: '31337', RPC_URL: LOCAL_RPC_URL })
+startApp('server', '@starter/server', LOCAL_SERVER_ENV)
 startApp('web', '@starter/web', {
   NEXT_PUBLIC_CHAIN_ID: '31337',
   NEXT_PUBLIC_RPC_URL: LOCAL_RPC_URL,

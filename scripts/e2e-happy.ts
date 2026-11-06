@@ -40,6 +40,7 @@ import {
   deployLocal,
   ensureAnvil,
   LOCAL_RPC_URL,
+  LOCAL_SERVER_ENV,
   ROOT,
   run as runCommand,
   waitFor,
@@ -100,8 +101,7 @@ async function setup() {
           cwd: ROOT,
           env: {
             ...process.env,
-            CHAIN_ID: '31337',
-            RPC_URL: LOCAL_RPC_URL,
+            ...LOCAL_SERVER_ENV,
             DATABASE_URL: 'memory://',
             // Rounds are stepped by this script through /api/dev/rounds/tick (local only).
             ROUNDS_ENABLED: 'false',

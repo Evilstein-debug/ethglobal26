@@ -18,6 +18,27 @@ import { anvil } from 'viem/chains'
 export const ROOT = resolve(import.meta.dirname, '../..')
 export const LOCAL_RPC_URL = 'http://127.0.0.1:8545'
 
+/**
+ * Env for a server started by local scripts (dev, e2e). apps/server/.env may hold real keys for
+ * Base; Node gives existing env vars precedence over --env-file, so blanking them here keeps a
+ * local run on the labeled stubs: no real Flash, 0G or World calls, no production database.
+ */
+export const LOCAL_SERVER_ENV: NodeJS.ProcessEnv = {
+  CHAIN_ID: '31337',
+  RPC_URL: LOCAL_RPC_URL,
+  DATABASE_URL: '',
+  MASTER_KEY: '',
+  OPERATOR_PRIVATE_KEY: '',
+  HUMAN_VERIFIER: 'dev',
+  FLASH_API_KEY: '',
+  FLASH_APPROVAL_SPENDERS: '',
+  FLASH_TYPED_DATA_CONTRACTS: '',
+  ZEROG_API_KEY: '',
+  WORLD_APP_ID: '',
+  WORLD_RP_ID: '',
+  WORLD_RP_SIGNING_KEY: '',
+}
+
 // Anvil's documented default mnemonic (https://getfoundry.sh/anvil/overview). Its keys are
 // public: local use only. We derive keys from it rather than hard-coding them.
 export const ANVIL_MNEMONIC = 'test test test test test test test test test test test junk'
