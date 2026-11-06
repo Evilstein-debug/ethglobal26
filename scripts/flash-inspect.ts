@@ -1,6 +1,7 @@
 /**
  * READ-ONLY Flash check for Base: run once with your integrator key before the first live trade.
- *   FLASH_API_KEY=dpka_... pnpm tsx scripts/flash-inspect.ts [funderAddress]
+ *   pnpm tsx scripts/flash-inspect.ts [funderAddress]
+ * Reads FLASH_API_KEY from the environment or apps/server/.env.
  *
  * It only asks for quotes (no signatures, no orders, no funds move) and prints:
  *   - the WETH asset and its price
@@ -9,14 +10,18 @@
  * Paste the addresses into FLASH_APPROVAL_SPENDERS / FLASH_TYPED_DATA_CONTRACTS
  * (apps/server/.env) and record them in VERIFIED.md.
  */
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { FlashClient } from '@starter/flash'
 import { decodeFunctionData, erc20Abi, isAddress, type Hex } from 'viem'
 
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' // Base USDC (Circle), see VERIFIED.md
 const WETH = '0x4200000000000000000000000000000000000006' // Base WETH9, see VERIFIED.md
 
+const serverEnv = resolve(import.meta.dirname, '../apps/server/.env')
+if (!process.env.FLASH_API_KEY && existsSync(serverEnv)) process.loadEnvFile(serverEnv)
 const apiKey = process.env.FLASH_API_KEY
-if (!apiKey) throw new Error('Set FLASH_API_KEY')
+if (!apiKey) throw new Error('Set FLASH_API_KEY (environment or apps/server/.env)')
 // Any address works for quoting; a fresh one shows the first-trade approvals.
 const funder = process.argv[2] ?? '0x000000000000000000000000000000000000dEaD'
 if (!isAddress(funder)) throw new Error(`not an address: ${funder}`)
