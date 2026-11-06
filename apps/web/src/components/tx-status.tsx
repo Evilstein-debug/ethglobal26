@@ -17,14 +17,14 @@ const LABEL = {
 
 /** Anvil mines at once, so a long wait means the wallet is counting from an older local chain. */
 function useStuckOnLocalChain(state: TxState) {
-  const [stuck, setStuck] = useState(false)
-  const pending = state.status === 'pending' && targetChain.id === LOCAL_CHAIN_ID
+  const [stuckHash, setStuckHash] = useState<string>()
+  const hash = state.status === 'pending' && targetChain.id === LOCAL_CHAIN_ID ? state.hash : null
   useEffect(() => {
-    if (!pending) return setStuck(false)
-    const timer = setTimeout(() => setStuck(true), 10_000)
+    if (!hash) return
+    const timer = setTimeout(() => setStuckHash(hash), 10_000)
     return () => clearTimeout(timer)
-  }, [pending])
-  return stuck
+  }, [hash])
+  return hash != null && hash === stuckHash
 }
 
 export function TxStatus({ state }: { state: TxState }) {
