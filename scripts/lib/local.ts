@@ -22,6 +22,8 @@ export const LOCAL_RPC_URL = 'http://127.0.0.1:8545'
  * Env for a server started by local scripts (dev, e2e). apps/server/.env may hold real keys for
  * Base; Node gives existing env vars precedence over --env-file, so blanking them here keeps a
  * local run on the labeled stubs: no real Flash, 0G or World calls, no production database.
+ * Opt in to real 0G decisions locally with LOCAL_REAL_0G=1 (0G calls touch no chain; they spend
+ * Router credits). Flash and World stay stubbed on anvil regardless.
  */
 export const LOCAL_SERVER_ENV: NodeJS.ProcessEnv = {
   CHAIN_ID: '31337',
@@ -33,7 +35,7 @@ export const LOCAL_SERVER_ENV: NodeJS.ProcessEnv = {
   FLASH_API_KEY: '',
   FLASH_APPROVAL_SPENDERS: '',
   FLASH_TYPED_DATA_CONTRACTS: '',
-  ZEROG_API_KEY: '',
+  ...(process.env.LOCAL_REAL_0G === '1' ? {} : { ZEROG_API_KEY: '' }),
   WORLD_APP_ID: '',
   WORLD_RP_ID: '',
   WORLD_RP_SIGNING_KEY: '',

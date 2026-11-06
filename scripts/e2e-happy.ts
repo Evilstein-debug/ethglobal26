@@ -102,6 +102,7 @@ async function setup() {
           env: {
             ...process.env,
             ...LOCAL_SERVER_ENV,
+            ZEROG_API_KEY: '', // e2e always uses the labeled local model
             DATABASE_URL: 'memory://',
             // Rounds are stepped by this script through /api/dev/rounds/tick (local only).
             ROUNDS_ENABLED: 'false',
