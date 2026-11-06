@@ -1,0 +1,39 @@
+# Foundry config: https://getfoundry.sh/config/overview
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+script = "script"
+libs = ["node_modules"]
+solc_version = "0.8.30"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",
+  "forge-std/=node_modules/forge-std/src/",
+]
+# The deploy script writes addresses here for codegen.
+fs_permissions = [{ access = "read-write", path = "../shared/deployments" }]
+
+# Named RPCs: `--rpc-url sepolia`. Forge loads ./.env automatically.
+[rpc_endpoints]
+localhost = "http://127.0.0.1:8545"
+sepolia = "${SEPOLIA_RPC_URL}"
+
+# Explorer API keys for `--verify` / `forge verify-contract`. See README "Verifying".
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+
+[fuzz]
+runs = 256
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = false
+
+[profile.ci.fuzz]
+runs = 1024
+
+[fmt]
+line_length = 100

@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Keep one viem across wagmi/RainbowKit/WalletConnect so types line up.
+overrides:
+  viem: 2.57.14
+  # wagmi's Base Account connector depends on @coinbase/cdp-sdk. From 1.53 it dynamically imports
+  # optional @x402/* peers that Next.js cannot resolve (dev server 500s). 1.52.x predates that.
+  '@coinbase/cdp-sdk': 1.52.0
+
+onlyBuiltDependencies:
+  - esbuild

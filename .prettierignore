@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+packages/shared/src/generated.ts
+packages/shared/deployments/
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
+packages/contracts/lib/
+.next/
+node_modules/

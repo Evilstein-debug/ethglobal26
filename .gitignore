@@ -1,0 +1,32 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# env (keep the examples)
+.env
+.env.*
+!.env.example
+
+# build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+
+# foundry
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
+broadcast/
+cache/
+
+# local runtime state
+.anvil/
+*.log
+
+# os / editor
+.DS_Store
+.idea/

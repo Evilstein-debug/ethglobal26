@@ -1,0 +1,69 @@
+# Required checks: "contracts" and "typecheck" (mark them required in branch protection).
+# "lint" is informational: it reports problems but never fails the workflow.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version comes from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.7 # keep in sync with README "Prerequisites"
+      - name: forge test
+        working-directory: packages/contracts
+        run: forge test -vvv
+        env:
+          FOUNDRY_PROFILE: ci
+      - name: Generated ABIs are up to date
+        run: |
+          pnpm codegen
+          git diff --exit-code packages/shared/src/generated.ts || {
+            echo "::error::packages/shared/src/generated.ts is stale. Run 'pnpm codegen' and commit."
+            exit 1
+          }
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @starter/shared test
+
+  lint:
+    name: lint (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm exec prettier --check .

@@ -1,0 +1,28 @@
+{
+  "name": "@starter/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./chains": "./src/chains.ts",
+    "./generated": "./src/generated.ts"
+  },
+  "scripts": {
+    "codegen": "wagmi generate",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "viem": "2.57.14"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@wagmi/cli": "2.10.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

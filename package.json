@@ -1,0 +1,37 @@
+{
+  "name": "eth-starter",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "dev:testnet": "pnpm --parallel --filter @starter/server --filter @starter/web dev",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present --no-bail lint && eslint scripts",
+    "lint:fix": "pnpm -r --if-present --no-bail lint:fix && eslint scripts --fix",
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p scripts",
+    "codegen": "pnpm --filter @starter/shared codegen",
+    "build:contracts": "pnpm --filter @starter/contracts build",
+    "deploy:local": "pnpm --filter @starter/contracts deploy:local && pnpm codegen",
+    "deploy:sepolia": "pnpm --filter @starter/contracts deploy:sepolia && pnpm codegen",
+    "e2e:happy": "tsx --env-file-if-exists=.env scripts/e2e-happy.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@starter/shared": "workspace:*",
+    "@types/node": "20.19.43",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "viem": "2.57.14"
+  }
+}
