@@ -139,6 +139,7 @@ with mock USDC) and Flash fills, because Flash only exists on mainnet. Fills are
 real price, so brackets fire on real moves.
 
 The chain is saved to `.anvil/state.json` and survives restarts, just as Neon does.
+Each person's chain is their own, so **each person needs their own database**: a Neon branch works.
 `pnpm dev:reset` clears both and starts over. It empties every table in `DATABASE_URL`, so never
 point it at a production database. Without keys, `LOCAL_STUBS=1 pnpm dev` runs on labeled stubs.
 

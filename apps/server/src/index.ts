@@ -231,7 +231,9 @@ async function assertDatabaseMatchesChain() {
     args: [getAddress(owner.wallet)],
   })
   if (human === zeroHash) {
-    throw new Error('This database belongs to an older local chain. Run `pnpm dev:reset`.')
+    throw new Error(
+      `DATABASE_URL holds owner ${owner.wallet}, who is not on this local chain. Either this database is shared with another machine (each person needs their own: a Neon branch works), or it's from an older chain. \`pnpm dev:reset\` empties the whole database, so check it isn't shared first.`,
+    )
   }
 }
 
