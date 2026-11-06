@@ -8,7 +8,7 @@
     "test": "forge test",
     "fmt": "forge fmt",
     "deploy:local": "forge script script/Deploy.s.sol --rpc-url localhost --broadcast --private-key $(cast wallet private-key 'test test test test test test test test test test test junk')",
-    "deploy:sepolia": "forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --account ${DEPLOYER_ACCOUNT:-deployer}"
+    "deploy:base": "forge script script/Deploy.s.sol --rpc-url base --broadcast --account ${DEPLOYER_ACCOUNT:-deployer}"
   },
   "devDependencies": {
     "@openzeppelin/contracts": "5.6.1",

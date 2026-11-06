@@ -6,9 +6,10 @@
  * add it to SUPPORTED_CHAINS, deploy, and run `pnpm codegen`.
  */
 import type { Chain, Hash, Address } from 'viem'
-import { anvil, sepolia } from 'viem/chains'
+import { anvil, base } from 'viem/chains'
 
-export const SUPPORTED_CHAINS = [anvil, sepolia] as const satisfies readonly Chain[]
+// Product decision: Base mainnet only (Flash has no testnet); anvil for local dev and tests.
+export const SUPPORTED_CHAINS = [anvil, base] as const satisfies readonly Chain[]
 
 export type SupportedChain = (typeof SUPPORTED_CHAINS)[number]
 export type SupportedChainId = SupportedChain['id']
@@ -49,13 +50,13 @@ export function resolveRpcUrl(chain: Chain, override?: string): string {
 }
 
 export function explorerTxUrl(chain: Chain, hash: Hash): string | undefined {
-  const base = chain.blockExplorers?.default.url
-  return base ? `${base}/tx/${hash}` : undefined
+  const explorer = chain.blockExplorers?.default.url
+  return explorer ? `${explorer}/tx/${hash}` : undefined
 }
 
 export function explorerAddressUrl(chain: Chain, address: Address): string | undefined {
-  const base = chain.blockExplorers?.default.url
-  return base ? `${base}/address/${address}` : undefined
+  const explorer = chain.blockExplorers?.default.url
+  return explorer ? `${explorer}/address/${address}` : undefined
 }
 
 /** Look up a generated `xxxAddress` map for a chain; undefined if not deployed there. */

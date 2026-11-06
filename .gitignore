@@ -30,3 +30,9 @@ cache/
 # os / editor
 .DS_Store
 .idea/
+
+# server database (SQLite)
+apps/server/data/
+*.db
+*.db-shm
+*.db-wal

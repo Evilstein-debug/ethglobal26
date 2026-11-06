@@ -15,7 +15,7 @@ const pollingInterval = isLocalChain(targetChain.id) ? 500 : undefined
 function makeConfig() {
   if (walletConnectProjectId) {
     return getDefaultConfig({
-      appName: 'eth-starter',
+      appName: 'AgentArena',
       projectId: walletConnectProjectId,
       chains,
       transports,

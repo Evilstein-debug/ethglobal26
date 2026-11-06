@@ -6,8 +6,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./canonical": "./src/canonical.ts",
     "./chains": "./src/chains.ts",
-    "./generated": "./src/generated.ts"
+    "./generated": "./src/generated.ts",
+    "./schemas": "./src/schemas.ts",
+    "./tokens": "./src/tokens.ts"
   },
   "scripts": {
     "codegen": "wagmi generate",
@@ -17,7 +20,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "viem": "2.57.14"
+    "viem": "2.57.14",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
