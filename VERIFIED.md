@@ -56,6 +56,17 @@ On anvil the app uses `MockUSDC` (`packages/contracts/src/mocks/MockUSDC.sol`, l
 | Independent check | `@0gfoundation/0g-compute-ts-sdk` `broker.inference.processResponse(provider, chatID)` via `https://evmrpc.0g.ai` | verifiable-execution page above                                                                         | 2026-11-06 |
 | JSON mode         | `response_format: {"type": "json_object"}`                                                                        | https://docs.0g.ai/developer-hub/building-on-0g/compute-network/router/features/chat-completions.md     | 2026-11-06 |
 
+## World ID (IDKit 4.x)
+
+| Value             | Value                                                                                                                                      | Source                                                          | Checked    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ---------- |
+| Packages          | `@worldcoin/idkit-core` 4.6.0 (server: `signRequest`, `hashSignal`), `@worldcoin/idkit` 4.6.0 (React)                                      | `npm view`; https://docs.world.org/world-id/idkit/javascript.md | 2026-11-06 |
+| RP signature      | Backend signs each request with the RP signing key (`signRequest({ signingKeyHex, action, ttl })`)                                         | https://docs.world.org/world-id/idkit/integrate.md (Step 3)     | 2026-11-06 |
+| Verify endpoint   | `POST https://developer.world.org/api/v4/verify/{rp_id}`, IDKit result forwarded as-is; require `success: true` and matching `environment` | integrate.md (Step 5)                                           | 2026-11-06 |
+| Credential preset | `proofOfHuman({ signal })` (legacy: `orbLegacy`); response `identifier` `proof_of_human` (3.0 legacy: `orb`)                               | javascript.md; integrate.md                                     | 2026-11-06 |
+| Nullifier         | Same person + app + action → same value; store as an integer, check uniqueness ourselves                                                   | integrate.md (Step 6)                                           | 2026-11-06 |
+| Testing           | Simulator https://simulator.worldcoin.org with `environment: "staging"`                                                                    | integrate.md (Step 4)                                           | 2026-11-06 |
+
 ## Toolchain
 
 | Tool      | Version | Where pinned                                | Source                                                                                                                | Checked    |

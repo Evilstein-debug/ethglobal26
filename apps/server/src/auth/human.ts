@@ -5,6 +5,7 @@
  *           so the onboarding flow can be exercised without a World app. env.ts refuses it on
  *           any real chain, and the API labels owners created this way.
  */
+import { verifyWorldProof, type WorldConfig } from '@starter/world'
 import { keccak256, toBytes } from 'viem'
 import { z } from 'zod'
 
@@ -36,4 +37,15 @@ export const devHumanVerifier: HumanVerifier = {
 /** humanId registered in Arena: keccak256 of the nullifier hash string. */
 export function humanIdOf(nullifierHash: string) {
   return keccak256(toBytes(nullifierHash.toLowerCase()))
+}
+
+/** World ID 4.0 Proof of Human, verified on our backend (packages/world). */
+export function worldHumanVerifier(cfg: WorldConfig): HumanVerifier {
+  return {
+    method: 'world',
+    async verify(proof, signal) {
+      const res = await verifyWorldProof(cfg, proof, signal)
+      return res.ok ? { ok: true, method: 'world', nullifierHash: res.nullifier } : res
+    },
+  }
 }

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { freshDb } from '../db/testing'
 import { call, startApi, user } from './fakes'
+import { hashSignal, rpSignature, walletSignal } from '@starter/world'
+import { worldHumanVerifier } from '../auth/human'
 
 const policy = { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20', predictionsPerRound: 5 }
 
@@ -220,4 +222,94 @@ test('unknown routes and bad JSON get JSON errors', async () => {
     body: '{',
   })
   assert.equal(res.status, 400)
+})
+
+// ── World ID route behaviour (portal faked; proof checks are real) ──────────────────────
+
+function worldProof(wallet: string, nullifier: string) {
+  return {
+    protocol_version: '4.0',
+    action: 'agentarena-owner-v1',
+    environment: 'production',
+    responses: [
+      {
+        identifier: 'proof_of_human',
+        signal_hash: hashSignal(walletSignal(wallet)),
+        proof: ['0x1'],
+        nullifier,
+      },
+    ],
+  }
+}
+
+async function worldApi() {
+  const portal = (async () =>
+    new Response(
+      JSON.stringify({ success: true, environment: 'production' }),
+    )) as unknown as typeof fetch
+  const cfg = {
+    appId: 'app_t',
+    rpId: 'rp_t',
+    signingKeyHex: 'ab'.repeat(32),
+    action: 'agentarena-owner-v1',
+    environment: 'production' as const,
+    fetch: portal,
+  }
+  return startApi(await freshDb(), {
+    humanVerifier: worldHumanVerifier(cfg),
+    world: {
+      appId: cfg.appId,
+      rpId: cfg.rpId,
+      action: cfg.action,
+      environment: cfg.environment,
+      sign: () => rpSignature(cfg),
+    },
+  })
+}
+
+test('world: one human with two wallets (same nullifier, different casing) gets one account', async () => {
+  const { base } = await worldApi()
+  const bob = user(1)
+  const bobAgain = user(2)
+  const first = await call(base, 'POST', '/api/owners/verify', {
+    auth: await bob.auth(),
+    body: { proof: worldProof(bob.address, '0x0ABC') },
+  })
+  assert.deepEqual([first.status, first.body.method], [201, 'world'])
+  const second = await call(base, 'POST', '/api/owners/verify', {
+    auth: await bobAgain.auth(),
+    body: { proof: worldProof(bobAgain.address, '0xabc') },
+  })
+  assert.deepEqual([second.status, second.body.error], [409, 'human_already_registered'])
+})
+
+test('world: a proof generated for another wallet cannot be replayed', async () => {
+  const { base } = await worldApi()
+  const victim = user(3)
+  const thief = user(4)
+  const res = await call(base, 'POST', '/api/owners/verify', {
+    auth: await thief.auth(),
+    body: { proof: worldProof(victim.address, '0x123') },
+  })
+  assert.deepEqual([res.status, res.body.error], [400, 'signal_mismatch'])
+})
+
+test('world: browser config exposes only public values; RP signature is server-made', async () => {
+  const { base } = await worldApi()
+  const config = await call(base, 'GET', '/api/world/config')
+  assert.deepEqual(config.body, {
+    method: 'world',
+    app_id: 'app_t',
+    rp_id: 'rp_t',
+    action: 'agentarena-owner-v1',
+    environment: 'production',
+  })
+  assert.ok(
+    !JSON.stringify(config.body).includes('ab'.repeat(32)),
+    'signing key never leaves the server',
+  )
+  const sig = await call(base, 'POST', '/api/world/rp-signature')
+  assert.ok(sig.body.sig && sig.body.nonce && sig.body.expires_at)
+  const { base: devBase } = await startApi(await freshDb())
+  assert.equal((await call(devBase, 'POST', '/api/world/rp-signature')).status, 404)
 })

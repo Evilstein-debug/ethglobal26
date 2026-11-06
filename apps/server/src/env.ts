@@ -71,6 +71,15 @@ export const env = {
   allowManualTrades: process.env.ALLOW_MANUAL_TRADES
     ? process.env.ALLOW_MANUAL_TRADES === 'true'
     : local,
+  world: {
+    appId: process.env.WORLD_APP_ID || undefined,
+    rpId: process.env.WORLD_RP_ID || undefined,
+    /** Secret. Never sent to the browser. */
+    signingKey: process.env.WORLD_RP_SIGNING_KEY || undefined,
+    action: process.env.WORLD_ACTION || 'agentarena-owner-v1',
+    environment: (process.env.WORLD_ENVIRONMENT === 'staging' ? 'staging' : 'production') as
+      'production' | 'staging',
+  },
   rounds: {
     enabled: (process.env.ROUNDS_ENABLED ?? 'true') === 'true',
     registrationMs: Number(process.env.ROUND_REGISTRATION_MS) || 180_000,

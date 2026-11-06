@@ -58,6 +58,26 @@ export function ownersRouter(ctx: AppContext) {
     }),
   )
 
+  /** What the browser needs to start IDKit (public values only) and how owners verify here. */
+  r.get('/world/config', (_req, res) => {
+    const w = ctx.world
+    res.json({
+      method: ctx.humanVerifier.method,
+      ...(w
+        ? { app_id: w.appId, rp_id: w.rpId, action: w.action, environment: w.environment }
+        : {}),
+    })
+  })
+
+  /** RP signature for one IDKit request, generated server-side (the signing key stays here). */
+  r.post('/world/rp-signature', (_req, res) => {
+    if (!ctx.world) {
+      res.status(404).json({ error: 'world_not_configured' })
+      return
+    }
+    res.json(ctx.world.sign())
+  })
+
   r.get(
     '/owners/:wallet',
     handler(async (req, res) => {

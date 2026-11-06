@@ -1,7 +1,8 @@
 import { FlashClient, LocalFlashStub } from '@starter/flash'
 import type { Address, PublicClient } from 'viem'
 import { createApp } from './app'
-import { devHumanVerifier, type HumanVerifier } from './auth/human'
+import { rpSignature } from '@starter/world'
+import { devHumanVerifier, worldHumanVerifier, type HumanVerifier } from './auth/human'
 import { chain, pollingInterval, publicClient, rpcUrl } from './chain/client'
 import { contractsOn } from './chain/contracts'
 import { createArenaOps } from './chain/operator'
@@ -19,12 +20,28 @@ const { db, kind: dbKind } = await openDb(env.databaseUrl)
 const contracts = contractsOn(chain.id)
 const client = publicClient as unknown as PublicClient
 
+const w = env.world
+const worldConfig =
+  w.appId && w.rpId && w.signingKey
+    ? {
+        appId: w.appId,
+        rpId: w.rpId,
+        signingKeyHex: w.signingKey,
+        action: w.action,
+        environment: w.environment,
+      }
+    : undefined
+
 function humanVerifier(): HumanVerifier {
   if (env.humanVerifier === 'dev') {
     console.warn('[server] HUMAN_VERIFIER=dev: owners are NOT World-verified (local anvil only)')
     return devHumanVerifier
   }
-  throw new Error('World ID verification arrives in Phase 6; set HUMAN_VERIFIER=dev on anvil')
+  if (!worldConfig) {
+    throw new Error('HUMAN_VERIFIER=world needs WORLD_APP_ID, WORLD_RP_ID and WORLD_RP_SIGNING_KEY')
+  }
+  console.log(`[server] World ID: ${worldConfig.environment}, action ${worldConfig.action}`)
+  return worldHumanVerifier(worldConfig)
 }
 
 function flashSetup(): FlashSetup | undefined {
@@ -105,6 +122,13 @@ const ctx: AppContext = {
   }),
   keyBox: new KeyBox(env.masterKey),
   humanVerifier: humanVerifier(),
+  world: worldConfig && {
+    appId: worldConfig.appId,
+    rpId: worldConfig.rpId,
+    action: worldConfig.action,
+    environment: worldConfig.environment,
+    sign: () => rpSignature(worldConfig),
+  },
   flash: flashSetup(),
   allowManualTrades: env.allowManualTrades,
   llm: llm(),

@@ -27,6 +27,14 @@ export type AppContext = {
   brain: BrainConfig
   /** Round timing and reward settings (scheduler). */
   rounds?: RoundConfig
+  /** Public World ID settings for the browser (IDKit) + server-side RP signing. */
+  world?: {
+    appId: string
+    rpId: string
+    action: string
+    environment: 'production' | 'staging'
+    sign: () => unknown
+  }
   /** LOCAL ANVIL ONLY: enables /api/dev/* helpers (stub price, manual round tick). */
   devTools?: boolean
   now: () => number
