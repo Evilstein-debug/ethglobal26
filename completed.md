@@ -24,6 +24,12 @@ chain, and claimed 2 USDC through the Claim button.
 
 ## Implemented
 
+### Real services on local runs
+
+- `pnpm dev`: real 0G (TEE signatures checked independently), World ID, Neon, live ETH price, RSS.
+- The chain persists to match Neon; `pnpm dev:reset` clears both.
+- Agents think in parallel; open stub positions survive a server restart.
+
 ### Per-trade markets (design v4, anvil only)
 
 - Autonomous agents: one `think` step chooses buy, predict or wait; code decides what's on offer.
@@ -111,7 +117,6 @@ These could only be checked up to the point real services are needed:
   assumptions in the README.
 - Local `pnpm dev` runs real rounds, but the stub's price doesn't move, so entries resolve NO
   unless you move it (README has the curl).
-- `pnpm dev` starts a fresh chain each time: delete `apps/server/data/` after a restart.
 
 ## What only you can do
 

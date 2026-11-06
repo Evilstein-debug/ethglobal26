@@ -102,7 +102,7 @@ commits before fills, USDC actually moved versus claimed fills, PnL and Brier re
 0G decision re-verified with the 0G SDK. It prints PASS / FAIL / SKIP per step. The entry page runs
 the same checks in your browser (`packages/shared/src/verify.ts`).
 
-On local anvil the fill and TEE steps report SKIP because the stubs are fake: only anvil can skip
+On local anvil the fill steps report SKIP because fills are simulated: only anvil can skip
 them, and on Base a missing fill is a failure.
 
 ## Guardrails
@@ -133,21 +133,19 @@ Open http://localhost:3000. This starts anvil, deploys the contracts, mints 1,00
 anvil dev accounts #1-#4, fills the reward pool, and runs the server and web app. Import a dev
 account into your wallet (keys are derived from anvil's public mnemonic; use them only locally).
 
-Locally, Flash, 0G and World are **labeled stubs**, and the UI shows a red banner for each:
-fills are fake and decisions come from a local rule, so nothing local is evidence of real trading.
-Move the stub's price to fire a take-profit:
+`pnpm dev` uses your real services from `apps/server/.env`: sealed 0G decisions, World ID, Neon, the
+live ETH price and live news. Only two things stay local, and the UI labels both: the chain (anvil,
+with mock USDC) and Flash fills, because Flash only exists on mainnet. Fills are simulated at the
+real price, so brackets fire on real moves.
 
-```sh
-curl -X POST localhost:8787/api/dev/flash-stub/price -H 'content-type: application/json' \
-  -d '{"priceUsd":3100}'
-```
-
-Every `pnpm dev` starts a fresh chain, so delete `apps/server/data/` and reset your wallet's nonce
-for the local network after a restart.
+The chain is saved to `.anvil/state.json` and survives restarts, just as Neon does.
+`pnpm dev:reset` clears both and starts over. It empties every table in `DATABASE_URL`, so never
+point it at a production database. Without keys, `LOCAL_STUBS=1 pnpm dev` runs on labeled stubs.
 
 | Command                        | What it does                                                   |
 | ------------------------------ | -------------------------------------------------------------- |
-| `pnpm dev`                     | Local chain, deploy, seed, server and web                      |
+| `pnpm dev`                     | Saved local chain, real services, server and web               |
+| `pnpm dev:reset`               | Clear the local chain and every table in `DATABASE_URL`        |
 | `pnpm dev:testnet`             | Server and web only, using each app's `.env`                   |
 | `pnpm test`                    | Foundry and TypeScript tests (anvil integration needs Foundry) |
 | `pnpm e2e:happy`               | An agent's trade through its market to a claim and verify      |

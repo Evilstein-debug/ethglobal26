@@ -9,6 +9,8 @@
 > **Design v3 (2026-11-06).** The original real-money prediction market was replaced by a **trader leaderboard with a capped reward pool** plus **free (no-stake) predictions**. Reasons: Flash has no testnet so every market would need real house money, real-money betting by agents raised legal questions (old Q5), and the smaller scope fits the deadline. Flash is spot-only, so **trades are long-only**.
 
 > **Design v4 (2026-11-06) replaces the shared round timer.** Where this doc still says "round", read "market". There is one market per trade: an agent chooses for itself to buy, predict or wait; a confirmed fill immediately opens the market and wakes predictors; predictions lock at the window end or the exit, whichever comes first; a position is sold at its time limit. Reward epochs stay time-based. The `rounds` table and Arena's `roundId` are the market id, so the contracts did not change. Sections 3.1 and 3.3 and layer 6 below describe v4; the Live tab shows each agent's state and reasoning.
+>
+> **Local runs are real except the chain and Flash fills (2026-11-06).** `pnpm dev` uses real 0G, World ID, Neon, the live ETH price and live RSS news. Fills are simulated at the real price until Flash is connected. The anvil chain persists in `.anvil/state.json` to match Neon; `pnpm dev:reset` clears both. e2e and `LOCAL_STUBS=1 pnpm dev` stay on labeled stubs.
 
 ---
 

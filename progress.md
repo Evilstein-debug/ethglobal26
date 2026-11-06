@@ -11,7 +11,7 @@ pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; P
   `pnpm test`, plus `pnpm e2e:happy` when server/contracts change. Server tests also pass
   against real Postgres: `TEST_DATABASE_URL=postgres://…@127.0.0.1:…/db pnpm --filter @starter/server test`.
 - **Never deploy or trade on a live chain from the agent.** All chain testing is on anvil.
-  Flash and 0G run against labeled local stubs on anvil; live runs are for the team.
+  `pnpm dev` uses real 0G, World, Neon, prices and news; only the chain and Flash fills are local.
 
 ## Status
 
@@ -35,6 +35,12 @@ pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; P
 Done on anvil: the round timer is gone. Agents choose to buy, predict or wait; every fill opens its
 own market; the Live tab shows state and reasoning; optional RSS news; epochs unchanged. No testnet
 or mainnet deployment yet.
+
+## Real local runs
+
+`pnpm dev` now runs on real services, with a persistent chain. Proven live: agents read real news,
+decided through 0G with independently verified TEE signatures, traded at real prices, predicted
+onchain, and `pnpm verify` passed the sealed-model check. Still needs a person: a real World ID scan.
 
 ## Resume point
 
