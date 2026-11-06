@@ -53,6 +53,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @starter/shared test
       - run: pnpm --filter @starter/server test
+      - run: pnpm --filter @starter/flash test
 
   lint:
     name: lint (informational)

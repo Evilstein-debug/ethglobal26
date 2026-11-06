@@ -1,6 +1,8 @@
 /**
- * Definitive Flash client (Phase 3): quote → approve → sign → submit → poll, against
- * https://flash.definitive.fi/v1. Request/response shapes come from the official OpenAPI spec
- * (https://flash.definitive.fi/v1/openapi.json); nothing here may be guessed.
+ * Definitive Flash: typed REST client (FlashClient), the cancel-message helper, and a LOCAL TEST
+ * ONLY stub (LocalFlashStub) for anvil. Shapes follow https://flash.definitive.fi/v1/openapi.json.
  */
-export {}
+export * from './cancel'
+export * from './client'
+export * from './stub'
+export * from './types'
