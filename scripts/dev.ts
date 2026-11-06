@@ -1,12 +1,13 @@
 /**
  * `pnpm dev`: the whole local stack with zero external keys.
  *   1. start anvil (or reuse one on :8545)
- *   2. deploy contracts + regenerate typed ABIs/addresses
+ *   2. deploy contracts + regenerate typed ABIs/addresses, mint mock USDC to the dev wallets and
+ *      fill the reward pool
  *   3. run apps/server and apps/web against chain 31337
  * For a testnet, use `pnpm dev:testnet` with each app's .env pointing at it.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { deployLocal, ensureAnvil, LOCAL_RPC_URL, ROOT } from './lib/local'
+import { deployLocal, ensureAnvil, LOCAL_RPC_URL, ROOT, seedLocal } from './lib/local'
 
 const children: ChildProcess[] = []
 
@@ -43,6 +44,7 @@ if (anvil) children.push(anvil)
 
 try {
   await deployLocal()
+  await seedLocal()
 } catch (error) {
   console.error('[dev] deploy failed:', error)
   shutdown(1)

@@ -1,8 +1,17 @@
 /** Helpers for the local anvil chain, shared by the dev and e2e scripts. */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, openSync } from 'node:fs'
+import { mkdirSync, openSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { createPublicClient, http, toHex } from 'viem'
+import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  parseUnits,
+  toHex,
+  type Address,
+  type Hash,
+} from 'viem'
 import { mnemonicToAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 
@@ -93,4 +102,44 @@ export async function deployLocal() {
     { cwd: resolve(ROOT, 'packages/contracts') },
   )
   await run('pnpm', ['codegen'])
+}
+
+/**
+ * LOCAL ONLY: give the anvil dev wallets mock USDC to fund agents with, and fill the reward pool.
+ * Run after `deployLocal`; addresses are read from the deployments file it just wrote.
+ */
+export async function seedLocal() {
+  const { MockUSDC: usdc, Arena: arena } = JSON.parse(
+    readFileSync(resolve(ROOT, 'packages/shared/deployments/31337.json'), 'utf8'),
+  ) as { MockUSDC: Address; Arena: Address }
+  const operator = createWalletClient({
+    account: anvilAccount(0).account,
+    chain: anvil,
+    transport: http(LOCAL_RPC_URL),
+  })
+  const send = async (hash: Promise<Hash>) =>
+    localClient.waitForTransactionReceipt({ hash: await hash })
+  const mint = (to: Address, amount: bigint) =>
+    send(
+      operator.writeContract({
+        address: usdc,
+        abi: mockUsdcAbi,
+        functionName: 'mint',
+        args: [to, amount],
+      }),
+    )
+  for (const i of [1, 2, 3, 4]) await mint(anvilAccount(i).account.address, parseUnits('1000', 6))
+  const pool = parseUnits('100', 6)
+  await mint(operator.account.address, pool)
+  await send(
+    operator.writeContract({
+      address: usdc,
+      abi: mockUsdcAbi,
+      functionName: 'approve',
+      args: [arena, pool],
+    }),
+  )
+  await send(
+    operator.writeContract({ address: arena, abi: arenaAbi, functionName: 'fund', args: [pool] }),
+  )
 }

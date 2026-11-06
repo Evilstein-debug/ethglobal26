@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { freshDb } from '../db/testing'
+import { eq } from 'drizzle-orm'
+import { freshDb, schema } from '../db/testing'
+import { clearReplay, seedReplay } from '../services/replay'
 import { call, startApi, user } from './fakes'
 import { hashSignal, rpSignature, walletSignal } from '@starter/world'
 import { worldHumanVerifier } from '../auth/human'
@@ -312,4 +314,30 @@ test('world: browser config exposes only public values; RP signature is server-m
   assert.ok(sig.body.sig && sig.body.nonce && sig.body.expires_at)
   const { base: devBase } = await startApi(await freshDb())
   assert.equal((await call(devBase, 'POST', '/api/world/rp-signature')).status, 404)
+})
+
+test('replay rows are labeled, keyless, inactive and removable', async () => {
+  const db = await freshDb()
+  const { base } = await startApi(db)
+  assert.equal(await seedReplay(db), 5)
+  assert.equal(await seedReplay(db), 5) // idempotent
+
+  const board = (await call(base, 'GET', '/api/leaderboard')).body as {
+    traders: { name: string; replay: boolean; netReturnPct: number }[]
+    predictors: { replay: boolean; meanBrier: number }[]
+  }
+  assert.equal(board.traders.length, 3)
+  assert.ok([...board.traders, ...board.predictors].every((r) => r.replay))
+  assert.ok(board.traders.every((t) => t.name.startsWith('Replay ')))
+  assert.ok(Math.abs(board.traders[0]!.netReturnPct - 682 / 22 / 100) < 1e-9)
+  assert.ok(Math.abs(board.predictors[0]!.meanBrier - 0.21) < 1e-9)
+
+  // Nothing here can act: the scheduler selects active agents only.
+  const active = await db.select().from(schema.agents).where(eq(schema.agents.status, 'active'))
+  assert.equal(active.length, 0)
+  assert.ok((await db.select().from(schema.agents)).every((a) => a.encKey === 'replay-no-key'))
+
+  assert.equal(await clearReplay(db), 5)
+  assert.equal((await db.select().from(schema.agentStats)).length, 0)
+  assert.equal((await db.select().from(schema.owners)).length, 0)
 })

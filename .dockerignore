@@ -1,0 +1,11 @@
+**/node_modules
+**/.next
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.anvil
+apps/server/data
+packages/contracts/out
+packages/contracts/cache
+packages/contracts/broadcast

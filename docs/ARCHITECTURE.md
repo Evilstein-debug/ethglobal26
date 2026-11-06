@@ -1,86 +1,72 @@
 # Architecture
 
-How the template fits together: where code lives, how data flows, and what to edit to swap a part.
+Where code lives and how data flows. Product rules and the data model: [CLAUDE.md](../CLAUDE.md).
 
-```mermaid
-flowchart LR
-  subgraph contracts["packages/contracts (Foundry)"]
-    SOL["src/*.sol"]
-    DEPLOY["script/Deploy.s.sol"]
-  end
-
-  subgraph shared["packages/shared"]
-    DEPS["deployments/&lt;chainId&gt;.json"]
-    GEN["src/generated.ts<br/>typed ABIs + addresses"]
-    CHAINS["src/chains.ts<br/>anvil, sepolia"]
-  end
-
-  subgraph web["apps/web (Next.js)"]
-    APP["app/app.tsx + components"]
-    TX["lib/use-tx.ts<br/>simulate → sign → confirm"]
-    WALLET["RainbowKit + wagmi"]
-  end
-
-  subgraph server["apps/server (Express)"]
-    API["/health · /api/feed"]
-    FEED["feed.ts<br/>polls escrow events"]
-  end
-
-  CHAIN[("EVM chain<br/>anvil 31337 / Sepolia")]
-  EXPLORER["Block explorer"]
-
-  DEPLOY -- "forge script --broadcast" --> CHAIN
-  DEPLOY -- writes --> DEPS
-  SOL -- "pnpm codegen (wagmi CLI)" --> GEN
-  DEPS -- "pnpm codegen" --> GEN
-
-  GEN --> APP
-  GEN --> FEED
-  CHAINS --> WALLET
-  CHAINS --> FEED
-
-  APP --> TX --> WALLET -- "signed txs" --> CHAIN
-  APP -- "reads" --> CHAIN
-  FEED -- "eth_getLogs" --> CHAIN
-  APP -- "GET /api/feed" --> API
-  API --- FEED
-  APP -. "tx links" .-> EXPLORER
+```
+apps/web             Next.js UI: arena, entry detail, leaderboards, rewards, onboarding, agents
+apps/server          Express API, scheduler, trader and predictor workers, resolver, reward epochs
+packages/contracts   TradeLog.sol, Arena.sol, mocks (anvil only), tests, Deploy.s.sol
+packages/shared      canonical hashing, schemas, tokens, chains, verify.ts, generated ABIs
+packages/flash       Definitive Flash REST client + labeled local stub
+packages/zerog       0G Compute Router client + labeled local stub
+packages/world       World ID verification helpers
+scripts              dev.ts, e2e-happy.ts, verify.ts, seed-replay.ts, flash-inspect.ts
 ```
 
-## Flows
+## Server map
 
-**Codegen (contract → TypeScript).** `forge script` deploys and writes
-`packages/shared/deployments/<chainId>.json`. `pnpm codegen` runs the wagmi CLI Foundry plugin:
-it builds the contracts and writes `src/generated.ts` with `xxxAbi` (`as const`) and
-`xxxAddress` (`{ [chainId]: address }`) for every contract in `packages/contracts/src`. Web,
-server and scripts import from `@starter/shared/generated`; nobody copies ABIs by hand. CI fails
-if the committed `generated.ts` is stale.
+| Path                      | Job                                                                  |
+| ------------------------- | -------------------------------------------------------------------- |
+| `src/rounds/scheduler.ts` | Round state machine, driven by the `rounds` table so restarts resume |
+| `src/brain/`              | 0G prompts, the three decisions, validation and clamping             |
+| `src/policy/authorize.ts` | Limits and atomic budget reservation; the only way to get a budget   |
+| `src/wallets/`            | Encrypted keys, egress allowlist, the signer                         |
+| `src/execution/`          | Commit → quote → approve → sign → submit → record; close             |
+| `src/rounds/resolver.ts`  | PnL from fills, outcome, Brier, stats                                |
+| `src/rewards/epoch.ts`    | Rankings, one award per human, `publishEpoch`                        |
+| `src/rounds/indexer.ts`   | Owner actions sent from browsers: manual predictions, reward claims  |
+| `src/routes/`             | HTTP API                                                             |
+| `src/services/replay.ts`  | Labeled replay rows                                                  |
 
-**Writes (browser → chain).** Components call `useTx().send({ address, abi, functionName, args })`.
-The hook simulates first (so revert reasons show before the wallet prompt), asks the wallet to
-sign, waits for the receipt, then refreshes all reads. `TxStatus` shows each stage and an
-explorer link.
+## One trade
 
-**Server.** Express 5 on Node. `feed.ts` polls `SimpleEscrow` logs with `eth_getLogs` over a block
-cursor and keeps the latest 100 entries in memory; `/api/feed` serves them. Put anything that
-must not run in the browser here (secrets, indexing, webhooks).
+```mermaid
+sequenceDiagram
+  participant S as Scheduler
+  participant G as 0G (TeeML)
+  participant P as Policy engine
+  participant T as TradeLog
+  participant F as Flash
+  S->>G: trade decision (price, labeled headlines)
+  G-->>S: JSON + request ID + tee_verified
+  S->>S: validate; reject or clamp
+  S->>P: authorize and reserve budget
+  S->>T: commit(round, intentHash, requestIdHash)
+  T-->>S: receipt (nothing goes to Flash before this)
+  S->>F: quote, approvals, sign entry + bracket, submit
+  F-->>S: fill
+  S->>T: recordExecution or recordFailure
+```
 
-**Active chain.** One env var per app selects it: `NEXT_PUBLIC_CHAIN_ID` (web), `CHAIN_ID`
-(server, scripts). RPC URLs are plain env overrides; without one, viem's default public RPC is
-used. The web app is configured for that single chain, so any other network in the wallet shows
-"Wrong network" with a switch prompt.
+## Where each guarantee lives
 
-**Local dev (`pnpm dev`).** `scripts/dev.ts` starts anvil (or reuses one on :8545), deploys with
-anvil's dev account #0, runs codegen, then starts server and web against chain 31337. Restarting
-gives a fresh chain with the same contract addresses (same deployer, same nonce).
+- **One human, one account:** unique `owners.world_nullifier_hash`.
+- **No self-prediction:** `Arena.predict` reverts on the same human, and the policy engine checks too.
+- **Predictions close before trading:** `Arena.lockPredictions`, checked against commit order in
+  `verify.ts`.
+- **Commit before trade:** order in `execution/trade.ts`, covered by tests.
+- **No hidden trades:** `TradeLog` requires each commit to end Executed or Failed; `verify.ts`
+  compares onchain commits with the intents the server claims.
+- **One award per human, capped epochs:** `Arena.publishEpoch`.
 
-## Swapping parts
+## Conventions
 
-| To change                 | Edit                                                                         |
-| ------------------------- | ---------------------------------------------------------------------------- |
-| Add a chain               | `packages/shared/src/chains.ts` (`SUPPORTED_CHAINS`), deploy, `pnpm codegen` |
-| RPC provider              | `RPC_URL` / `NEXT_PUBLIC_RPC_URL` / `SEPOLIA_RPC_URL`                        |
-| Explorer for verification | flags in `packages/contracts/README.md#verifying`                            |
-| Server framework          | `apps/server/src/index.ts` (~30 lines)                                       |
-| Feed storage              | `apps/server/src/feed.ts` (in-memory array → a database)                     |
-| Look and feel             | tokens in `apps/web/src/app/globals.css`, primitives in `components/ui.tsx`  |
+- **Codegen, not copy-paste.** The deploy script writes `packages/shared/deployments/<chainId>.json`;
+  `pnpm codegen` turns it and the contracts into typed exports. CI fails if they're stale.
+- **Safe writes in the browser.** `useTx()` simulates first, so revert reasons show before the
+  wallet opens, then signs, waits for the receipt and refreshes reads.
+- **One chain per deployment.** `NEXT_PUBLIC_CHAIN_ID` (web) and `CHAIN_ID` (server, scripts).
+- **Stubs are labeled.** On anvil, Flash, 0G and World are stand-ins; the API reports them and the UI
+  shows a banner. None of them can run on Base.
+- **Database.** Postgres through Drizzle: Neon in production, in-process PGlite locally and in
+  tests. Migrations apply on open.

@@ -141,7 +141,7 @@ export default function EntryPage() {
       <Panel title="Predictions">
         {predictions.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full whitespace-nowrap text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
               <thead className="text-xs text-muted">
                 <tr>
                   <th className="py-1 font-normal">Predictor</th>

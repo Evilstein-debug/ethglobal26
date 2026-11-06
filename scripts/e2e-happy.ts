@@ -35,7 +35,15 @@ import {
   type Address,
 } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { anvilAccount, deployLocal, ensureAnvil, LOCAL_RPC_URL, ROOT, waitFor } from './lib/local'
+import {
+  anvilAccount,
+  deployLocal,
+  ensureAnvil,
+  LOCAL_RPC_URL,
+  ROOT,
+  run as runCommand,
+  waitFor,
+} from './lib/local'
 
 const chainId = parseChainId(process.env.CHAIN_ID)
 const chain = getChain(chainId)
@@ -437,6 +445,19 @@ async function run() {
     'Beta on the predictor leaderboard',
   )
   done(`${bobAward.amount / 1e6} USDC claimed`)
+
+  done = step('scripts/verify.ts re-derives the entry from chain data')
+  await runCommand('pnpm', ['exec', 'tsx', 'scripts/verify.ts', String(entry.id)], {
+    env: { SERVER_URL: serverUrl, RPC_URL: rpcUrl },
+  })
+  const missing = await runCommand('pnpm', ['exec', 'tsx', 'scripts/verify.ts', '999999'], {
+    env: { SERVER_URL: serverUrl, RPC_URL: rpcUrl },
+  }).then(
+    () => false,
+    () => true,
+  )
+  assert(missing, 'verify.ts exits non-zero for an unknown entry')
+  done()
 
   done = step('pause blocks the agent')
   await api('POST', `/api/agents/${agentId}/pause`, { auth })

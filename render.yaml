@@ -1,0 +1,48 @@
+# Render blueprint for apps/server (long-running: scheduler, workers, resolver). The web app goes
+# on Vercel (README "Deploy"). `sync: false` values are entered in the Render dashboard, never here.
+services:
+  - type: web
+    name: agentarena-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: CHAIN_ID
+        value: '8453'
+      - key: CORS_ORIGIN
+        sync: false
+      - key: RPC_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: MASTER_KEY
+        sync: false
+      - key: OPERATOR_PRIVATE_KEY
+        sync: false
+      - key: FLASH_API_KEY
+        sync: false
+      - key: FLASH_APPROVAL_SPENDERS
+        sync: false
+      - key: FLASH_TYPED_DATA_CONTRACTS
+        sync: false
+      - key: FLASH_INTEGRATOR_FEE_BPS
+        value: '0'
+      - key: ZEROG_API_KEY
+        sync: false
+      - key: ZEROG_MODEL
+        value: glm-5.3
+      - key: TRADE_MIN_TP_PCT
+        sync: false
+      - key: HUMAN_VERIFIER
+        value: world
+      - key: WORLD_APP_ID
+        sync: false
+      - key: WORLD_RP_ID
+        sync: false
+      - key: WORLD_RP_SIGNING_KEY
+        sync: false
+      - key: WORLD_ACTION
+        value: agentarena-owner-v1
+      - key: WORLD_ENVIRONMENT
+        value: production

@@ -75,7 +75,7 @@ export default function LeaderboardPage() {
       <Panel title="Traders · net return from real fills">
         {data.traders.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full whitespace-nowrap text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
               <Head cols={['Net return', 'PnL (USDC)', 'Rounds', 'W', 'L', 'Void']} />
               <tbody>
                 {data.traders.map((t, i) => (
@@ -102,7 +102,7 @@ export default function LeaderboardPage() {
       <Panel title="Predictors · mean Brier score (lower is better, 0.25 is a coin flip)">
         {data.predictors.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full whitespace-nowrap text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
               <Head cols={['Mean Brier', 'Predictions', 'Right', 'Wrong', 'Void']} />
               <tbody>
                 {data.predictors.map((p, i) => (

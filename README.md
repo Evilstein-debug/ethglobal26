@@ -1,157 +1,226 @@
-# eth-starter
+# AgentArena
 
-A minimal EVM hackathon starter. Clone it, run one command, and you have a local chain, a
-deployed contract, typed bindings, a backend and a wallet-connected web app, all wired together
-and tested. No product logic, no paid services, no keys needed to run locally.
+A Base-native arena where AI trading agents trade real markets through **Definitive Flash**
+bracket orders, other agents predict whether they will profit, every decision is made by a sealed
+**0G Private Computer** model, every trade is committed onchain before it happens, and every owner
+is verified as a unique human by **World ID**.
 
-It ships with one small example contract (`SimpleEscrow`: lock ETH for someone, release or refund
-it) so every layer has something real to exercise. Replace it with your idea.
+"My bot made money" is unverifiable. Here an agent's record is public, computed from real fills of
+trades it committed to in advance, and anyone can re-check any result. Strategy stays private
+(sealed inference); results are public.
 
-## What it uses
+**Why come back tomorrow:** rounds run every hour. Owners return to see whether their trader
+profited, whether their predictor called it, where they rank, and what rewards they can claim, and
+to adjust limits for the next round.
 
-| Layer         | Tools                                                                              |
-| ------------- | ---------------------------------------------------------------------------------- |
-| Monorepo      | pnpm workspaces, TypeScript (strict), Node 20                                      |
-| Contracts     | Foundry (forge, anvil, cast), OpenZeppelin, forge-std                              |
-| Contract → TS | wagmi CLI (generates typed ABIs + deployed addresses)                              |
-| Web           | Next.js (App Router), React, wagmi, viem, RainbowKit, TanStack Query, Tailwind CSS |
-| Server        | Express 5, viem                                                                    |
-| Quality       | ESLint (typescript-eslint + eslint-config-next), Prettier, GitHub Actions          |
+> Demo, not financial advice. ETHGlobal Mumbai 2026.
 
-Exact versions and where each external value was verified: [VERIFIED.md](VERIFIED.md).
+| Live demo         | Video             | Team                                |
+| ----------------- | ----------------- | ----------------------------------- |
+| _TODO(team): URL_ | _TODO(team): URL_ | _TODO(team): names, Telegram and X_ |
 
-## Quickstart
+## How a round works
 
-Prerequisites:
+```
+REGISTRATION → PREDICTING → TRADING → RESOLVING → SETTLED
+```
 
-- **Node 20.20.2**: `nvm use` (reads `.nvmrc`; Node ≥ 20.19 works)
-- **pnpm 10.15.0**: `corepack enable` (version is pinned in `package.json`)
-- **Foundry v1.8.7** ([install docs](https://getfoundry.sh/introduction/installation)):
-  ```sh
-  curl -L https://foundry.paradigm.xyz | bash
-  foundryup --install v1.8.7
-  ```
+1. **Registration.** Each trading agent asks its sealed 0G model whether to trade this round and
+   with how much, clamped to the owner's limits. Agents that opt in get an onchain entry: "Will
+   agent X end round N with positive realized PnL, net of fees?"
+2. **Predicting.** Predictor agents study traders' public histories, ask 0G, and post YES/NO with a
+   probability onchain. Owners can pick by hand. Nothing is staked. Predictions lock onchain before
+   any trade.
+3. **Trading.** The model proposes a long WETH bracket; plain code validates it; the agent commits
+   the intent hash to `TradeLog`; only after that receipt does a Flash market buy with attached
+   take-profit and stop-loss go out. Anything open at the end is cancelled and market-sold.
+4. **Resolving.** Realized PnL comes only from Flash fills of committed intents. Predictions get a
+   Brier score (calibration, not lucky guesses).
+5. **Rewards.** Each epoch the top 3 traders and the top predictor split a capped USDC budget, at
+   most one award per human, enforced onchain. Owners claim from their verified wallet.
 
-Then:
+```mermaid
+flowchart TB
+  Owner["Owner: wallet + World ID"] --> Web["apps/web · Next.js"]
+  Web -- REST --> Server["apps/server · API, policy engine, scheduler,<br/>trader + predictor workers, resolver, rewards"]
+  Web -- "predict, claim, verify reads" --> Base
+  Server -- "sealed inference" --> ZG["0G Private Computer<br/>(Compute Router, TeeML)"]
+  Server -- "market buy + bracket" --> Flash["Definitive Flash API"]
+  Server -- "proof verification" --> World["World ID"]
+  Server --> Base[("Base mainnet: USDC, WETH, agent wallets,<br/>TradeLog, Arena")]
+  Flash --> Base
+```
+
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Partner integrations
+
+**Definitive Flash.** The main flow trades through the Flash REST API: market buys USDC→WETH with
+`attachedBracket { takeProfit, stopLoss }`, settled on Base. Flash fills feed the social layer:
+public agent records, a trader leaderboard with rewards, and agents predicting each other.
+Code: `packages/flash`, `apps/server/src/execution`.
+
+**0G Private Computer.** The models make the real decisions: allocation, trade and prediction,
+through the Compute Router with TeeML models only (trust mode `private`, `verify_tee: true`). A
+response without `tee_verified: true` is rejected. Each request ID is stored, shown in the UI and
+hashed into the onchain commit or prediction. Code: `packages/zerog`, `apps/server/src/brain`.
+
+> **What breaks without 0G:** The models are the agents: they decide whether to trade, how to
+> trade, and who will win, inside sealed enclaves so strategies stay private. Without 0G there are
+> no decisions, and no proof which model made them.
+
+**World ID (IDKit, Proof of Human).** Owners verify once at onboarding; our backend verifies the
+proof, binds it to the wallet (signal) and enforces a unique nullifier. The human ID is registered
+in `Arena`, which reverts predictions on your own human's agents and pays at most one award per
+human per epoch. Alternative paths: a second wallet for the same human is rejected, and a cancelled
+verification shows a cancelled state. Code: `packages/world`, `apps/server/src/auth`,
+`apps/web/src/app/onboard`. Debrief: [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md).
+
+> **Why Proof of Human is the minimum sufficient credential:** We don't need to know who you are or
+> your nationality, only that you are one unique person, so one human can't run many accounts to
+> farm the reward pool or predict on their own agents. Proof of Human gives exactly that.
+
+## Check any result yourself
+
+```sh
+pnpm verify <entryId>                  # local
+SERVER_URL=<server> RPC_URL=<base rpc> pnpm verify <entryId>
+```
+
+`scripts/verify.ts` needs no keys and sends nothing. It treats the server's data as claims and
+checks them against Base: entry state, predictions closed before the lock, no self-prediction,
+every commit accounted for with its hash recomputed, every commit ended as executed or failed,
+commits before fills, USDC actually moved versus claimed fills, PnL and Brier recomputed, and each
+0G decision re-verified with the 0G SDK. It prints PASS / FAIL / SKIP per step. The entry page runs
+the same checks in your browser (`packages/shared/src/verify.ts`).
+
+On local anvil the fill and TEE steps report SKIP because the stubs are fake: only anvil can skip
+them, and on Base a missing fill is a failure.
+
+## Guardrails
+
+| Risk                            | What stops it                                                                                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An agent loses more than funded | Each agent has its own wallet; the worst case is what the owner sent it                                                                                          |
+| A bug bypasses the limits       | One signing path; budget reserved atomically; signer only talks to TradeLog, Arena, the owner, and approvals or EIP-712 for Flash's contracts                    |
+| Prompt injection                | Fixed JSON schema, no tools; plain code validates every field (WETH only, long only, stop below and target above entry, R:R, sizes). The model never sets limits |
+| Self-dealing and sybils         | One human, one account (nullifier); predicting on your own human's trader reverts onchain; one award per human per epoch                                         |
+| Fake or cherry-picked results   | Commit before trade; failures logged onchain; PnL only from fills of committed intents; WETH only, so no self-made tokens                                        |
+| Reward pool drained             | Per-epoch cap onchain, pool holds only what the next epochs need                                                                                                 |
+
+## Run it locally
+
+No keys needed. Prerequisites:
+
+- **Node 20.20.2**: `nvm use` (Node ≥ 20.19 works)
+- **pnpm 10.15.0**: `corepack enable`
+- **Foundry v1.8.7**: `curl -L https://foundry.paradigm.xyz | bash && foundryup --install v1.8.7`
 
 ```sh
 pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3000. `pnpm dev` starts a local chain (anvil), deploys the contracts,
-generates typed bindings, and runs the server (http://localhost:8787) and the web app.
+Open http://localhost:3000. This starts anvil, deploys the contracts, mints 1,000 mock USDC to
+anvil dev accounts #1-#4, fills the reward pool, and runs the server and web app. Import a dev
+account into your wallet (keys are derived from anvil's public mnemonic; use them only locally).
 
-**Wallet on the local chain.** Your browser wallet needs local ETH. Either import one of anvil's
-dev accounts (keys are printed in `.anvil/anvil.log`; they are public, use them only locally) or
-send yourself some:
+Locally, Flash, 0G and World are **labeled stubs**, and the UI shows a red banner for each:
+fills are fake and decisions come from a local rule, so nothing local is evidence of real trading.
+Move the stub's price to fire a take-profit:
 
 ```sh
-cast send <your-address> --value 10ether --rpc-url http://127.0.0.1:8545 \
-  --private-key $(cast wallet private-key "test test test test test test test test test test test junk")
+curl -X POST localhost:8787/api/dev/flash-stub/price -H 'content-type: application/json' \
+  -d '{"priceUsd":3100}'
 ```
 
-Every `pnpm dev` starts a fresh chain, so clear your wallet's cached activity for the local
-network after a restart, or transactions can hang on a stale nonce.
+Every `pnpm dev` starts a fresh chain, so delete `apps/server/data/` and reset your wallet's nonce
+for the local network after a restart.
 
-## How it works
+| Command                        | What it does                                                        |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `pnpm dev`                     | Local chain, deploy, seed, server and web                           |
+| `pnpm dev:testnet`             | Server and web only, using each app's `.env`                        |
+| `pnpm test`                    | Foundry and TypeScript tests (anvil integration needs Foundry)      |
+| `pnpm e2e:happy`               | A full round through the real server, through to a claim and verify |
+| `pnpm verify <entryId>`        | Re-derive one entry from public data                                |
+| `pnpm seed:replay [--clear]`   | Add or remove the labeled replay rows on the leaderboards           |
+| `pnpm codegen`                 | Rebuild contracts, regenerate typed ABIs and addresses              |
+| `pnpm deploy:base`             | Deploy to Base with your Foundry keystore, then codegen             |
+| `pnpm typecheck` / `pnpm lint` | TypeScript and ESLint across all packages                           |
 
-```mermaid
-flowchart LR
-  Contracts["packages/contracts<br/>Foundry"] -- "deploy" --> Chain[("EVM chain<br/>anvil / Sepolia")]
-  Contracts -- "pnpm codegen" --> Shared["packages/shared<br/>typed ABIs + addresses"]
-  Shared --> Web["apps/web<br/>Next.js + RainbowKit"]
-  Shared --> Server["apps/server<br/>Express"]
-  Web -- "signed txs, reads" --> Chain
-  Web -- "GET /api/feed" --> Server
-  Server -- "event logs" --> Chain
+## Deploy
+
+**Contracts (Base mainnet).** Costs real gas. Import the deployer once with
+`cast wallet import deployer --interactive`, then:
+
+```sh
+USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 OPERATOR_ADDRESS=<server operator wallet> \
+  pnpm deploy:base
 ```
 
-- **Codegen, not copy-paste.** The deploy script writes addresses to
-  `packages/shared/deployments/<chainId>.json`; `pnpm codegen` turns every contract in
-  `packages/contracts/src` into typed `xxxAbi` / `xxxAddress` exports that the web app, server and
-  scripts import. CI fails if they are out of date.
-- **Safe writes.** `useTx()` in the web app simulates each call first (revert reasons show before
-  the wallet opens), then signs, waits for the receipt and refreshes reads. `<TxStatus>` shows
-  each step with an explorer link.
-- **One chain per app.** `NEXT_PUBLIC_CHAIN_ID` (web) and `CHAIN_ID` (server, scripts) pick the
-  active chain; RPC URLs are plain env overrides. A wallet on another network gets a
-  "Wrong network" button that switches it.
-- **Server for what shouldn't run in the browser.** The example polls escrow events and serves
-  them at `/api/feed`.
+Commit `packages/shared/deployments/8453.json` and the regenerated `generated.ts`.
 
-More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Server (Render, or any Docker host).** `render.yaml` and the `Dockerfile` run `apps/server`.
+Fill in the `sync: false` values; every key is documented in `apps/server/.env.example`.
+`DATABASE_URL` is your Neon pooled connection string; migrations apply on boot.
 
-## Commands
+**Web (Vercel).** Set Root Directory to `apps/web`, with `NEXT_PUBLIC_CHAIN_ID=8453`,
+`NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_SERVER_URL`, and optionally
+`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`. Add its URL to the server's `CORS_ORIGIN`.
 
-| Command                       | What it does                                                                           |
-| ----------------------------- | -------------------------------------------------------------------------------------- |
-| `pnpm dev`                    | Local chain + deploy + codegen + server + web                                          |
-| `pnpm dev:testnet`            | Server + web only, using each app's `.env` (e.g. pointed at Sepolia)                   |
-| `pnpm test`                   | Foundry tests (unit, fuzz, invariant; fork test if `FORK_RPC_URL` is set) + TS tests   |
-| `pnpm e2e:happy`              | Runs the full flow (contract + server) the way the UI does. Run it before touching UI. |
-| `pnpm codegen`                | Rebuild contracts and regenerate typed ABIs/addresses                                  |
-| `pnpm deploy:local`           | Redeploy to a running local chain, then codegen                                        |
-| `pnpm deploy:sepolia`         | Deploy to Sepolia with your Foundry keystore, then codegen                             |
-| `pnpm typecheck`              | TypeScript across all packages                                                         |
-| `pnpm lint` / `pnpm lint:fix` | ESLint (style rules are warnings, never errors)                                        |
-| `pnpm format`                 | Prettier                                                                               |
+**Reward pool.** Fund what the next epochs need from the operator wallet:
 
-## Layout
-
-```
-apps/
-  web/          Next.js app: app/app.tsx is the page, components/ holds its parts
-  server/       Express API: /health, /api/feed
-packages/
-  contracts/    Foundry project: example contract, tests, deploy script
-  shared/       chain configs + generated ABIs/addresses
-scripts/        pnpm dev orchestrator, e2e:happy
-docs/           ARCHITECTURE.md
-VERIFIED.md     every external value, its source and check date
+```sh
+cast send 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 "approve(address,uint256)" <arena> 5000000 \
+  --rpc-url base --account operator
+cast send <arena> "fund(uint256)" 5000000 --rpc-url base --account operator
 ```
 
-## Building on it
+**Before the first live trade.** Run `FLASH_API_KEY=… pnpm tsx scripts/flash-inspect.ts` (read-only
+quotes) and put its output in the server env. The signer refuses Flash contracts it hasn't been
+told about. Set `TRADE_MIN_TP_PCT` above the measured round-trip fees, or small winning trades
+become realized losses.
 
-1. **Contract:** replace `packages/contracts/src/SimpleEscrow.sol` and its tests, deploy yours in
-   `script/Deploy.s.sol` (add it to the JSON there), then `pnpm codegen`. New contracts are
-   picked up automatically.
-2. **UI:** replace the escrow components in `apps/web/src/components/` and the panels in
-   `app/app.tsx`. Keep `lib/use-tx.ts`, `components/tx-status.tsx` and
-   `components/connect-button.tsx`. Restyle with the tokens in `app/globals.css`.
-3. **Server:** add routes in `apps/server/src/index.ts`.
-4. **Test the flow:** update `scripts/e2e-happy.ts` to your happy path and keep it green.
+## Contracts
 
-To add a chain, add it to `packages/shared/src/chains.ts` (metadata comes from `viem/chains`),
-deploy, and run `pnpm codegen`.
+| Contract | Base mainnet                                 |
+| -------- | -------------------------------------------- |
+| TradeLog | _TODO(team): after deploy_                   |
+| Arena    | _TODO(team): after deploy_                   |
+| USDC     | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 
-## Deploying to Sepolia
+## Trust assumptions
 
-1. Deploy and verify the contracts: [packages/contracts/README.md](packages/contracts/README.md)
-   (Etherscan, Blockscout and Sourcify instructions).
-2. Point the apps at Sepolia: `NEXT_PUBLIC_CHAIN_ID=11155111` in `apps/web/.env.local`,
-   `CHAIN_ID=11155111` in `apps/server/.env` (plus RPC URLs if you have them).
-3. `pnpm dev:testnet`, then `pnpm e2e:happy` with the root `.env` set for Sepolia.
+- The **operator** resolves entries from public Flash fills and publishes rewards from public
+  scores. It's trusted to do so, but anyone can re-check with `scripts/verify.ts`. A trustless
+  resolver is out of scope.
+- The **server** holds agent keys, encrypted at rest. Agent wallets are plain EOAs funded only with
+  what owners send; worst-case loss is that balance.
+- A VOID for a changed policy is declared by the operator; it can't be derived from chain data.
+- Leaderboard rows marked **replay** are sample data, never real results. They can't earn rewards.
 
-## Environment
+## Partner checklist
 
-Nothing is needed locally. Every `.env.example` is commented with doc links.
+- [ ] **Definitive:** Flash market orders with attached brackets in the main flow; onchain execution
+      on Base shown in the demo; leaderboard + agent predictions as the social layer; clip posted on
+      Discord and X tagging @DefinitiveFi.
+- [ ] **0G:** sealed inference on 0G Private Computer (TeeML, trust mode `private`) in the main flow
+      with request IDs and TEE verification shown; a working app judges can try with a reason to
+      come back tomorrow; "what breaks without 0G" sentence; public repo + README + setup; video
+      under 3 min; live demo link; contract addresses; team names + Telegram and X.
+- [ ] **World (IDKit):** IDKit in onboarding; Proof of Human verified on our backend; trust moment
+      and minimum-credential reasoning above; demo shows success plus a rejected second account or
+      a cancelled verification; `WORLD_FEEDBACK.md` debrief included.
+- [ ] **General:** steady commit history; AI usage disclosed; no secrets in the repo; replay data
+      labeled; "demo, not financial advice" disclaimer.
 
-| File                              | For                        | Testnet values                                                                        |
-| --------------------------------- | -------------------------- | ------------------------------------------------------------------------------------- |
-| `.env.example`                    | `pnpm e2e:happy`           | `CHAIN_ID`, `RPC_URL`, `E2E_PRIVATE_KEY` (throwaway key)                              |
-| `apps/web/.env.example`           | web (`.env.local`)         | `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` |
-| `apps/server/.env.example`        | server (`.env`)            | `CHAIN_ID`, `RPC_URL`                                                                 |
-| `packages/contracts/.env.example` | deploy, verify, fork tests | `SEPOLIA_RPC_URL`, `ETHERSCAN_API_KEY` (Etherscan only)                               |
+## AI usage
 
-The WalletConnect project ID is optional: without it the app offers browser wallets only.
-Never put a key that holds real funds in any `.env`.
-
-## CI
-
-`.github/workflows/ci.yml` runs on pushes and PRs: `contracts` (forge tests, generated bindings
-up to date) and `typecheck` are meant to be required checks; `lint` is informational.
+The code and docs in this repo were written with AI coding agents (Claude Code) working from the
+project spec in [CLAUDE.md](CLAUDE.md), with the team reviewing and committing. At runtime, agent
+decisions come from 0G-hosted models.
 
 ## License
 
-MIT
+MIT. External values, their sources and check dates: [VERIFIED.md](VERIFIED.md).

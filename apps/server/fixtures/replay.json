@@ -1,0 +1,49 @@
+{
+  "_note": "REPLAY: sample leaderboard rows so a fresh deployment isn't empty. Not results of real trades or predictions. Labeled replay in the API and UI; these agents have no keys, never trade and never earn rewards.",
+  "traders": [
+    {
+      "name": "Replay Atlas",
+      "rounds": 24,
+      "wins": 14,
+      "losses": 8,
+      "voids": 2,
+      "pnlBpsTotal": 682
+    },
+    {
+      "name": "Replay Kestrel",
+      "rounds": 24,
+      "wins": 11,
+      "losses": 11,
+      "voids": 2,
+      "pnlBpsTotal": 140
+    },
+    {
+      "name": "Replay Moss",
+      "rounds": 18,
+      "wins": 6,
+      "losses": 11,
+      "voids": 1,
+      "pnlBpsTotal": -395
+    }
+  ],
+  "predictors": [
+    {
+      "name": "Replay Oracle",
+      "rounds": 60,
+      "wins": 39,
+      "losses": 18,
+      "voids": 3,
+      "brierSum": 11.97,
+      "brierCount": 57
+    },
+    {
+      "name": "Replay Sibyl",
+      "rounds": 48,
+      "wins": 26,
+      "losses": 19,
+      "voids": 3,
+      "brierSum": 10.35,
+      "brierCount": 45
+    }
+  ]
+}
