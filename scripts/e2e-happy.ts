@@ -1,11 +1,13 @@
 /**
  * `pnpm e2e:happy`: the source of truth that the stack works, before touching UI.
- * Grows phase by phase until it runs a full round (CLAUDE.md §8). Today:
+ * Runs the whole product locally (CLAUDE.md §8):
  *   anvil → deploy → server up (db, chain) → owner verifies (dev verifier, anvil only) and is
  *   registered in Arena → agent created and registered → funded with MockUSDC + ETH →
  *   trade previews show deny reasons → USDC withdraw through the agent signer → a second wallet
  *   for the same human is rejected → manual bracket trade through the LOCAL Flash stub (commit →
- *   fill → recordExecution onchain) → take-profit fires → position closed → pause blocks the agent.
+ *   fill → recordExecution onchain) → take-profit fires → position closed → pause blocks the agent → an agent
+ *   decides to buy → its market is broadcast → another human's agent predicts → lock → exit →
+ *   resolve → epoch → claim → scripts/verify.ts re-derives the entry.
  *
  * Local anvil only: it never touches a live chain.
  */
@@ -104,11 +106,12 @@ async function setup() {
             ...LOCAL_SERVER_ENV,
             ZEROG_API_KEY: '', // e2e always uses the labeled local model
             DATABASE_URL: 'memory://',
-            // Rounds are stepped by this script through /api/dev/rounds/tick (local only).
-            ROUNDS_ENABLED: 'false',
-            ROUND_REGISTRATION_MS: '1000',
-            ROUND_PREDICTING_MS: '1000',
-            ROUND_TRADING_MS: '1500',
+            // Agents and markets are stepped by this script through /api/dev/tick (local only).
+            AGENTS_ENABLED: 'false',
+            PREDICTION_WINDOW_MS: '1000',
+            TRADE_MAX_HOLD_MS: '60000',
+            TRADE_COOLDOWN_MS: '0',
+            AGENT_THINK_MS: '1',
             REWARD_EPOCH_MS: String(EPOCH_MS),
             REWARD_MIN_PREDICTIONS: '1',
           },
@@ -313,9 +316,7 @@ async function run() {
   )
   done(`pnl +${((row.usdcReceived - row.usdcSpent) / 1e6).toFixed(4)} USDC (stub)`)
 
-  done = step(
-    'round: allocation → entry → prediction (other human) → lock → trade → TP → resolve YES',
-  )
+  done = step('market: agent buys → broadcast → prediction (other human) → lock → TP → resolve YES')
   const alice = owner()
   await api('POST', '/api/owners/verify', {
     auth: await alice.auth(),
@@ -359,62 +360,79 @@ async function run() {
     )
   }
   await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3000 } })
-  const tickRound = async () => (await api('POST', '/api/dev/rounds/tick')).body.acted
-  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
-  const first = await api('POST', '/api/dev/rounds/tick')
-  assert(first.body.acted === 'started', `round started: ${JSON.stringify(first.body)}`)
-  const current = async () =>
-    (await api('GET', '/api/rounds/current')).body as {
+  type MarketView = {
+    id: number
+    epochId: number
+    phase: string
+    entries: {
       id: number
-      epochId: number
-      phase: string
-      entries: {
-        id: number
-        trader: { id: string }
-        outcome: string
-        pnlBps: number
-        predictions: { yes: number }
-      }[]
+      trader: { id: string }
+      outcome: string
+      pnlBps: number
+      predictions: { yes: number }
+    }[]
+  }
+  const tick = () => api('POST', '/api/dev/tick')
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const marketOf = async (entryId?: number) => {
+    const { open, recent } = (await api('GET', '/api/markets')).body as {
+      open: MarketView[]
+      recent: MarketView[]
     }
-  let round = await current()
-  const entry = round.entries.find((e) => e.trader.id === agentId)
-  assert(entry, `Alpha entered round ${round.id}: ${JSON.stringify(round.entries)}`)
-  await pause(1100)
-  assert((await tickRound()) === 'REGISTRATION', '→ PREDICTING')
-  round = await current()
+    return [...open, ...recent].find((m) =>
+      m.entries.some((e) => (entryId ? e.id === entryId : e.trader.id === agentId)),
+    )
+  }
+  await tick() // Alpha decides to buy on its own; the fill opens a public market
+  let market = await marketOf()
+  assert(market?.phase === 'PREDICTING', `market broadcast: ${JSON.stringify(market)}`)
+  const entry = market.entries[0]!
+  const activity = (await api('GET', '/api/activity')).body as {
+    agents: { id: string; state: string }[]
+    events: { state: string; rationale: string | null; decision: { requestId: string } | null }[]
+  }
   assert(
-    round.entries.find((e) => e.id === entry.id)!.predictions.yes === 1,
-    'Beta predicted YES on Alpha',
+    activity.agents.find((a) => a.id === agentId)?.state === 'watching_position',
+    'Live tab shows Alpha watching its trade',
   )
-  await pause(1100)
-  assert((await tickRound()) === 'PREDICTING', '→ TRADING')
-  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3100 } })
-  await pause(1600)
-  assert((await tickRound()) === 'TRADING', '→ RESOLVING → SETTLED')
-  round = await current()
-  const resolved = round.entries.find((e) => e.id === entry.id)!
   assert(
-    round.phase === 'SETTLED' && resolved.outcome === 'YES' && resolved.pnlBps > 0,
-    `resolved: ${JSON.stringify(resolved)}`,
+    activity.events.some((e) => e.state === 'broadcast') &&
+      activity.events.some((e) => e.state === 'trading' && e.rationale && e.decision?.requestId),
+    'Live tab shows the broadcast and the reasoning',
+  )
+  await tick() // Beta was woken by the broadcast
+  market = await marketOf(entry.id)
+  assert(market!.entries[0]!.predictions.yes === 1, 'Beta predicted YES on Alpha')
+  await pause(1100)
+  await tick()
+  market = await marketOf(entry.id)
+  assert(market!.phase === 'TRADING', `predictions locked, trade open: ${market!.phase}`)
+  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3100 } })
+  await tick()
+  market = await marketOf(entry.id)
+  const resolved = market!.entries[0]!
+  assert(
+    market!.phase === 'SETTLED' && resolved.outcome === 'YES' && resolved.pnlBps > 0,
+    `resolved: ${JSON.stringify(market)}`,
   )
   const detail = await api('GET', `/api/entries/${entry.id}`)
   const decisions = detail.body.decisions as { model: string; requestId: string }[]
   assert(
-    decisions.length >= 3 && decisions.every((d) => d.model === 'local-stub'),
+    decisions.length >= 2 && decisions.every((d) => d.model === 'local-stub'),
     'entry detail lists labeled decisions',
   )
-  done(`round ${round.id}, entry ${entry.id} YES +${resolved.pnlBps} bps`)
+  done(`market ${market!.id}, entry ${entry.id} YES +${resolved.pnlBps} bps`)
 
   done = step('epoch ends → awards published → owner claims onchain')
-  const epochEnd = (round.epochId + 1) * EPOCH_MS
+  const epochEnd = (market!.epochId + 1) * EPOCH_MS
   await pause(Math.max(0, epochEnd - Date.now()) + 200)
-  await tickRound()
+  await tick()
   const epochs = (await api('GET', '/api/epochs')).body.epochs as {
     id: number
     status: string
     awards: { ownerWallet: string; amount: number }[]
   }[]
-  const epoch = epochs.find((e) => e.id === round.epochId)
+  const epoch = epochs.find((e) => e.id === market!.epochId)
   assert(epoch?.status === 'published', `epoch published: ${JSON.stringify(epoch)}`)
   const bobAward = epoch.awards.find((a) => a.ownerWallet === bob.address.toLowerCase())
   assert(bobAward && bobAward.amount > 0, 'Bob earned a trader award')
@@ -429,7 +447,7 @@ async function run() {
     address: arena,
     abi: arenaAbi,
     functionName: 'claim',
-    args: [BigInt(round.epochId)],
+    args: [BigInt(market!.epochId)],
   })
   assert(
     (await publicClient.waitForTransactionReceipt({ hash: claimHash })).status === 'success',

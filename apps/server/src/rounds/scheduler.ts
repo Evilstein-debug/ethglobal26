@@ -61,14 +61,25 @@ async function ensureEpoch(ctx: AppContext, cfg: MarketConfig) {
   return epochId
 }
 
+const isLocked = (ctx: AppContext, id: number) =>
+  ctx.publicClient.readContract({
+    address: ctx.contracts.arena,
+    abi: arenaAbi,
+    functionName: 'roundLocked',
+    args: [BigInt(id)],
+  })
+
 /** A market id for a trade about to happen: the intent commits to it before anything is sent. */
 export async function reserveMarket(ctx: AppContext, cfg: MarketConfig): Promise<Market> {
   const [last] = await ctx.db.select().from(schema.rounds).orderBy(desc(schema.rounds.id)).limit(1)
+  let id = (last?.id ?? 0) + 1
+  // Fresh database, same contracts: an id already used onchain can never open again.
+  while (await isLocked(ctx, id)) id++
   const now = ctx.now()
   const [market] = await ctx.db
     .insert(schema.rounds)
     .values({
-      id: (last?.id ?? 0) + 1,
+      id,
       phase: 'OPENING',
       epochId: await ensureEpoch(ctx, cfg),
       startsAt: now,

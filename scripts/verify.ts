@@ -1,5 +1,5 @@
 /**
- * `pnpm verify <entryId>`: re-derive one round entry yourself. Fetches the claims from the server,
+ * `pnpm verify <entryId>`: re-derive one market's entry yourself. Fetches the claims from the server,
  * then checks them against the chain (packages/shared/src/verify.ts, the same checks as the entry
  * page) and re-verifies each 0G decision's TEE signature with the 0G SDK. Prints PASS / FAIL / SKIP
  * per step; exits 1 if anything fails. Read-only: it signs and sends nothing.
@@ -61,7 +61,7 @@ const report = await verifyEntry(bundle, client, {
 
 const TAG: Record<VerifyStatus, string> = { pass: 'PASS', fail: 'FAIL', skip: 'SKIP' }
 console.log(
-  `Entry ${entryId}: will ${bundle.trader.name} end round ${bundle.entry.roundId} in profit? ` +
+  `Entry ${entryId}: will ${bundle.trader.name}'s trade make money? ` +
     `Claimed ${bundle.entry.outcome} on ${chain.name}\n`,
 )
 for (const s of report.steps) console.log(`${TAG[s.status]}  ${s.label}\n      ${s.detail}`)

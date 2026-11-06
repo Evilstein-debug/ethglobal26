@@ -39,6 +39,13 @@ export const LOCAL_SERVER_ENV: NodeJS.ProcessEnv = {
   WORLD_APP_ID: '',
   WORLD_RP_ID: '',
   WORLD_RP_SIGNING_KEY: '',
+  // Fast timings for local testing. Set any of these yourself to override.
+  PREDICTION_WINDOW_MS: process.env.PREDICTION_WINDOW_MS ?? '60000',
+  TRADE_MAX_HOLD_MS: process.env.TRADE_MAX_HOLD_MS ?? '180000',
+  TRADE_COOLDOWN_MS: process.env.TRADE_COOLDOWN_MS ?? '60000',
+  AGENT_THINK_MS: process.env.AGENT_THINK_MS ?? '15000',
+  REWARD_EPOCH_MS: process.env.REWARD_EPOCH_MS ?? '300000',
+  REWARD_MIN_PREDICTIONS: process.env.REWARD_MIN_PREDICTIONS ?? '1',
 }
 
 // Anvil's documented default mnemonic (https://getfoundry.sh/anvil/overview). Its keys are

@@ -89,7 +89,7 @@ export const env = {
     enabled: (process.env.AGENTS_ENABLED ?? 'true') === 'true',
     predictionWindowMs: Number(process.env.PREDICTION_WINDOW_MS) || 300_000,
     maxHoldMs: Number(process.env.TRADE_MAX_HOLD_MS) || 1_800_000,
-    cooldownMs: Number(process.env.TRADE_COOLDOWN_MS) || 300_000,
+    cooldownMs: Number(process.env.TRADE_COOLDOWN_MS ?? 300_000),
     thinkEveryMs: Number(process.env.AGENT_THINK_MS) || 60_000,
     epochMs: Number(process.env.REWARD_EPOCH_MS) || 3_600_000,
     epochBudget: Number(process.env.REWARD_EPOCH_BUDGET) || 5_000_000,
