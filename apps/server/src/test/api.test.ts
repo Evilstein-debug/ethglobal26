@@ -7,7 +7,7 @@ import { call, startApi, user } from './fakes'
 import { hashSignal, rpSignature, walletSignal } from '@starter/world'
 import { worldHumanVerifier } from '../auth/human'
 
-const policy = { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20', predictionsPerRound: 5 }
+const policy = { perTradeCap: '5', dailyCap: '20', predictionsPerDay: 5 }
 
 async function verified(base: string, seed: number, human: string) {
   const u = user(seed)
@@ -120,7 +120,7 @@ test('agents: input validation', async () => {
     (await call(base, 'POST', '/api/agents', { auth, body })).body.error
   assert.equal(await bad({ name: 'A', mode: 'yolo', policy }), 'invalid_request')
   assert.equal(
-    await bad({ name: 'A', mode: 'trade', policy: { ...policy, perTradeCap: '11' } }),
+    await bad({ name: 'A', mode: 'trade', policy: { ...policy, perTradeCap: '21' } }),
     'invalid_request',
   )
   assert.equal(

@@ -171,6 +171,7 @@ export async function executeTrade(
     },
     usdcBalance,
     ctx.now(),
+    { cooldownMs: ctx.brain.tradeCooldownMs },
   )
   if (!auth.ok) return { status: 'denied', reason: auth.reason }
 

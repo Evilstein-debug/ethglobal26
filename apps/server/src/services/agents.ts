@@ -31,13 +31,12 @@ const usdcAmount = z
 export const policyInput = z
   .object({
     perTradeCap: usdcAmount,
-    roundTradeCap: usdcAmount,
     dailyCap: usdcAmount,
-    predictionsPerRound: z.number().int().min(0).max(50).default(10),
+    predictionsPerDay: z.number().int().min(0).max(500).default(50),
   })
   .strict()
-  .refine((p) => p.perTradeCap <= p.roundTradeCap && p.roundTradeCap <= p.dailyCap, {
-    message: 'caps must satisfy perTrade ≤ perRound ≤ daily',
+  .refine((p) => p.perTradeCap <= p.dailyCap, {
+    message: 'caps must satisfy perTrade ≤ daily',
   })
 
 export const createAgentInput = z
@@ -182,9 +181,8 @@ function publicAgent(
     createdAt: agent.createdAt,
     policy: policy && {
       perTradeCap: fmtUsdc(policy.perTradeCap),
-      roundTradeCap: fmtUsdc(policy.roundTradeCap),
       dailyCap: fmtUsdc(policy.dailyCap),
-      predictionsPerRound: policy.predictionsPerRound,
+      predictionsPerDay: policy.predictionsPerDay,
       tokenAllowlist: JSON.parse(policy.tokenAllowlist) as string[],
       paused: policy.paused,
     },

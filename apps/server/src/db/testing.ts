@@ -52,9 +52,8 @@ export async function seedAgent(
     human?: string
     mode?: 'trade' | 'predict' | 'both'
     perTradeCap?: number
-    roundTradeCap?: number
     dailyCap?: number
-    predictionsPerRound?: number
+    predictionsPerDay?: number
   } = {},
 ) {
   const n = ++seq
@@ -86,9 +85,8 @@ export async function seedAgent(
   await db.insert(schema.policies).values({
     agentId,
     perTradeCap: opts.perTradeCap ?? 5_000_000,
-    roundTradeCap: opts.roundTradeCap ?? 10_000_000,
     dailyCap: opts.dailyCap ?? 20_000_000,
-    predictionsPerRound: opts.predictionsPerRound ?? 10,
+    predictionsPerDay: opts.predictionsPerDay ?? 10,
   })
   return { agentId, ownerWallet, humanId: `0x${human}` }
 }

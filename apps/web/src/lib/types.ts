@@ -8,9 +8,8 @@ export type AgentView = {
   registerTx: string | null
   policy?: {
     perTradeCap: string
-    roundTradeCap: string
     dailyCap: string
-    predictionsPerRound: number
+    predictionsPerDay: number
     tokenAllowlist: string[]
     paused: boolean
   }

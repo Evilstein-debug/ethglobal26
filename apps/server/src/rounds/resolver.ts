@@ -22,7 +22,6 @@ export type EntryResolution = {
 export function policySnapshot(policy: typeof schema.policies.$inferSelect) {
   const snap = {
     perTradeCap: policy.perTradeCap,
-    roundTradeCap: policy.roundTradeCap,
     dailyCap: policy.dailyCap,
     tokenAllowlist: JSON.parse(policy.tokenAllowlist) as string[],
     paused: policy.paused,

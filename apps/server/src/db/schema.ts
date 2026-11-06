@@ -70,11 +70,11 @@ export const policies = pgTable('policies', {
     .primaryKey()
     .references(() => agents.id),
   perTradeCap: num('per_trade_cap').notNull(),
-  roundTradeCap: num('round_trade_cap').notNull(),
   dailyCap: num('daily_cap').notNull(),
   /** JSON array of TradeAsset symbols, e.g. ["WETH"]. */
   tokenAllowlist: text('token_allowlist').notNull().default('["WETH"]'),
-  predictionsPerRound: integer('predictions_per_round').notNull().default(10),
+  /** Rolling 24h limit on this agent's onchain predictions. */
+  predictionsPerDay: integer('predictions_per_day').notNull().default(50),
   paused: boolean('paused').notNull().default(false),
   updatedAt: updatedAt(),
 })

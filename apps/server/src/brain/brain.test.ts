@@ -10,7 +10,7 @@ import { skipReason, startAnvilWorld } from '../test/anvil'
 import { decideAllocation, decidePredictions, decideTrade } from './decide'
 import { localModel } from './local-model'
 
-const policy = { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20', predictionsPerRound: 5 }
+const policy = { perTradeCap: '5', dailyCap: '20', predictionsPerDay: 5 }
 const scripted = (fn: () => unknown) =>
   new LocalLLMStub(() => (typeof fn() === 'string' ? (fn() as string) : JSON.stringify(fn())))
 
@@ -67,7 +67,7 @@ describe('brain on anvil', { skip: skipReason }, () => {
     )
     const res = await decideAllocation(w.ctx, w.trader, 1)
     assert.equal(res.trade, true)
-    assert.equal('budget' in res && res.budget, 10_000_000)
+    assert.equal('budget' in res && res.budget, 5_000_000)
     const [d] = await w.db.select().from(schema.decisions)
     assert.equal(d!.kind, 'allocation')
     assert.equal(d!.accepted, true)

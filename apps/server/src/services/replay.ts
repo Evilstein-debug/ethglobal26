@@ -54,7 +54,7 @@ export async function seedReplay(db: Db, now = Date.now()) {
       .onConflictDoNothing()
     await db
       .insert(schema.policies)
-      .values({ agentId: id, perTradeCap: 0, roundTradeCap: 0, dailyCap: 0, paused: true })
+      .values({ agentId: id, perTradeCap: 0, dailyCap: 0, paused: true })
       .onConflictDoNothing()
     await db
       .insert(schema.agentStats)

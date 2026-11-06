@@ -15,6 +15,20 @@
       "when": 1793959584745,
       "tag": "0001_blue_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793975458454,
+      "tag": "0002_overconfident_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793975459746,
+      "tag": "0003_premium_emma_frost",
+      "breakpoints": true
     }
   ]
 }

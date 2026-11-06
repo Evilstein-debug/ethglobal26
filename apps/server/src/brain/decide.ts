@@ -141,13 +141,13 @@ export async function decideAllocation(ctx: AppContext, agent: AgentRow, roundId
   const data = {
     round: roundId,
     balanceUsdc: Number(usdc) / 1e6,
-    limits: { roundTradeCap: policy.roundTradeCap / 1e6, perTradeCap: policy.perTradeCap / 1e6 },
+    limits: { roundTradeCap: policy.perTradeCap / 1e6, perTradeCap: policy.perTradeCap / 1e6 },
     history: await traderHistory(ctx, agent.id),
   }
   const res = await ask(ctx, agent.id, roundId, 'allocation', ALLOCATION_SYSTEM, data)
   if (!res.ok) return { trade: false as const, reason: res.reason }
   const v = validateAllocation(res.parsed, {
-    roundTradeCap: policy.roundTradeCap,
+    roundTradeCap: policy.perTradeCap,
     balance: Number(usdc),
     minTrade: ctx.brain.minTrade,
   })
@@ -276,9 +276,9 @@ export async function decidePredictions(ctx: AppContext, agent: AgentRow, roundI
   )
   const [made] = await queryRows<{ n: string }>(
     ctx.db,
-    sql`select count(*) as n from predictions where agent_id = ${agent.id} and round_id = ${roundId}`,
+    sql`select count(*) as n from predictions where agent_id = ${agent.id} and created_at >= ${ctx.now() - 86_400_000}`,
   )
-  const maxCount = Math.max(0, policy.predictionsPerRound - Number(made?.n ?? 0))
+  const maxCount = Math.max(0, policy.predictionsPerDay - Number(made?.n ?? 0))
   if (offered.length === 0 || maxCount === 0)
     return {
       decisionId: undefined,
@@ -350,7 +350,11 @@ export async function submitAgentPrediction(
   },
 ): Promise<PredictionOutcome> {
   const { decision } = args
-  const gate = await authorizePrediction(ctx.db, { agentId: agent.id, entryId: args.localEntryId })
+  const gate = await authorizePrediction(
+    ctx.db,
+    { agentId: agent.id, entryId: args.localEntryId },
+    ctx.now(),
+  )
   if (!gate.ok) return { entryId: decision.entryId, status: 'denied', reason: gate.reason }
 
   const prediction = predictionSchema.parse({
@@ -396,6 +400,7 @@ export async function submitAgentPrediction(
       canonicalJson: canonicalJson(prediction),
       decisionId: args.decisionId,
       predictTx: hash,
+      createdAt: ctx.now(),
     })
     return { entryId: decision.entryId, status: 'submitted', tx: hash }
   } catch (err) {

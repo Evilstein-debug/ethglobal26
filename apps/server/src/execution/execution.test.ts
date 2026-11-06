@@ -10,7 +10,7 @@ import { skipReason, startAnvilWorld } from '../test/anvil'
 import { closePosition, realizedPnl } from './close'
 import { executeTrade, newIntentId } from './trade'
 
-const policy = { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20' }
+const policy = { perTradeCap: '5', dailyCap: '20' }
 
 function intentFor(agent: Address, overrides: Record<string, unknown> = {}) {
   return {

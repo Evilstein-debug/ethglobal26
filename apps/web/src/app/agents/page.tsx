@@ -15,9 +15,8 @@ function CreateAgent() {
     name: '',
     mode: 'both',
     perTradeCap: '5',
-    roundTradeCap: '10',
     dailyCap: '20',
-    predictionsPerRound: '5',
+    predictionsPerDay: '50',
   })
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -36,9 +35,8 @@ function CreateAgent() {
           mode: form.mode,
           policy: {
             perTradeCap: form.perTradeCap,
-            roundTradeCap: form.roundTradeCap,
             dailyCap: form.dailyCap,
-            predictionsPerRound: Number(form.predictionsPerRound),
+            predictionsPerDay: Number(form.predictionsPerDay),
           },
         },
       })
@@ -63,23 +61,17 @@ function CreateAgent() {
         <option value="predict">Predict only</option>
       </Select>
       <Field
-        label="Predictions / round"
+        label="Predictions / day"
         type="number"
         min={0}
-        max={50}
-        value={form.predictionsPerRound}
-        onChange={set('predictionsPerRound')}
+        max={500}
+        value={form.predictionsPerDay}
+        onChange={set('predictionsPerDay')}
       />
       <Field
         label="Max per trade (USDC)"
         value={form.perTradeCap}
         onChange={set('perTradeCap')}
-        inputMode="decimal"
-      />
-      <Field
-        label="Max per round (USDC)"
-        value={form.roundTradeCap}
-        onChange={set('roundTradeCap')}
         inputMode="decimal"
       />
       <Field

@@ -1,0 +1,1 @@
+ALTER TABLE "policies" ADD COLUMN "predictions_per_day" integer DEFAULT 50 NOT NULL;

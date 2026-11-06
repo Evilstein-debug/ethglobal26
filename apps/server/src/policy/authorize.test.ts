@@ -36,11 +36,7 @@ test('a valid trade reserves budget', async () => {
 
 test('every deny reason', async () => {
   const db = await freshDb()
-  const { agentId } = await seedAgent(db, {
-    perTradeCap: USDC(5),
-    roundTradeCap: USDC(8),
-    dailyCap: USDC(12),
-  })
+  const { agentId } = await seedAgent(db, { perTradeCap: USDC(5), dailyCap: USDC(8) })
   const { agentId: predictor } = await seedAgent(db, { mode: 'predict' })
 
   const reasons = async (req: ReturnType<typeof trade>, balance = BIG) => {
@@ -55,10 +51,11 @@ test('every deny reason', async () => {
   assert.equal(await reasons(trade(agentId, USDC(5) + 1)), 'over_trade_cap')
   assert.equal(await reasons(trade(agentId, USDC(1)), 999_999n), 'insufficient_funds')
 
-  assert.equal(await reasons(trade(agentId, USDC(5))), 'ok')
-  assert.equal(await reasons(trade(agentId, USDC(4))), 'over_round_trade_cap') // 5 + 4 > 8
-  assert.equal(await reasons(trade(agentId, USDC(3))), 'ok') // round now 8
-  assert.equal(await reasons(trade(agentId, USDC(5), { roundId: 2 })), 'over_daily_cap') // day 13 > 12
+  const first = await authorizeTrade(db, trade(agentId, USDC(5)), BIG)
+  assert.ok(first.ok)
+  assert.equal(await reasons(trade(agentId, 1, { roundId: 2 })), 'position_open')
+  await settleReservation(db, first.reservationId)
+  assert.equal(await reasons(trade(agentId, USDC(4), { roundId: 2 })), 'over_daily_cap') // 5 + 4 > 8
 
   await db.update(schema.policies).set({ paused: true }).where(eq(schema.policies.agentId, agentId))
   assert.equal(await reasons(trade(agentId, 1, { roundId: 3 })), 'paused')
@@ -91,15 +88,14 @@ test('allowlist is per agent, and only within TRADE_ASSETS', async () => {
 
 test('released budget is reusable; settled budget counts', async () => {
   const db = await freshDb()
-  const { agentId } = await seedAgent(db, { perTradeCap: USDC(5), roundTradeCap: USDC(5) })
+  const { agentId } = await seedAgent(db, { perTradeCap: USDC(5), dailyCap: USDC(5) })
   const first = await authorizeTrade(db, trade(agentId, USDC(5)), BIG)
   assert.ok(first.ok)
-  assert.equal((await authorizeTrade(db, trade(agentId, 1), BIG)).ok, false)
   await releaseReservation(db, first.reservationId)
   const second = await authorizeTrade(db, trade(agentId, USDC(5)), BIG)
   assert.ok(second.ok)
   await settleReservation(db, second.reservationId, USDC(4))
-  // settled 4 of a 5 cap → 1 USDC left this round
+  // settled 4 of a 5 cap → 1 USDC left today
   assert.equal((await authorizeTrade(db, trade(agentId, USDC(1)), BIG)).ok, true)
   await assert.rejects(releaseReservation(db, first.reservationId), /not open/)
   await assert.rejects(settleReservation(db, second.reservationId), /not open/)
@@ -113,48 +109,65 @@ test('settle rejects amounts above the reservation', async () => {
   await assert.rejects(settleReservation(db, r.reservationId, USDC(3)), /outside/)
 })
 
-test('open reservations count against the wallet balance', async () => {
+test('reservation race: one agent can only open one position', async () => {
   const db = await freshDb()
-  const { agentId } = await seedAgent(db, { roundTradeCap: USDC(100), dailyCap: USDC(100) })
-  const balance = BigInt(USDC(6))
-  assert.equal((await authorizeTrade(db, trade(agentId, USDC(4)), balance)).ok, true)
-  // 4 reserved + 4 > 6 in the wallet
-  assert.deepEqual(await authorizeTrade(db, trade(agentId, USDC(4)), balance), {
-    ok: false,
-    reason: 'insufficient_funds',
-  })
-})
-
-test('reservation race: concurrent requests never exceed the round cap', async () => {
-  const db = await freshDb()
-  const { agentId } = await seedAgent(db, {
-    perTradeCap: USDC(1),
-    roundTradeCap: USDC(5),
-    dailyCap: USDC(100),
-  })
+  const { agentId } = await seedAgent(db, { perTradeCap: USDC(1), dailyCap: USDC(100) })
   const results = await Promise.all(
     Array.from({ length: 20 }, () => authorizeTrade(db, trade(agentId, USDC(1)), BIG)),
   )
-  assert.equal(results.filter((r) => r.ok).length, 5)
-  const reserved = await db.select().from(schema.spendLedger)
-  assert.equal(
-    reserved.reduce((s, r) => s + r.amount, 0),
-    USDC(5),
-  )
+  assert.equal(results.filter((r) => r.ok).length, 1)
+  assert.equal((await db.select().from(schema.spendLedger)).length, 1)
+})
+
+test('an unclosed intent blocks the next trade until it closes', async () => {
+  const db = await freshDb()
+  const { agentId } = await seedAgent(db)
+  const open = await authorizeTrade(db, trade(agentId, USDC(1)), BIG)
+  assert.ok(open.ok)
+  await settleReservation(db, open.reservationId)
+  await db.insert(schema.intents).values({
+    intentId: 'i1',
+    roundId: 1,
+    agentId,
+    canonicalJson: '{}',
+    intentHash: '0x1',
+    state: 'EXECUTED',
+    asset: 'WETH',
+    sizeQuote: USDC(1),
+    entryRefPrice: '3000',
+    stopPrice: '2950',
+    targetPrice: '3060',
+  })
+  assert.deepEqual(await authorizeTrade(db, trade(agentId, 1), BIG), {
+    ok: false,
+    reason: 'position_open',
+  })
+  await db.update(schema.intents).set({ state: 'CLOSED' }).where(eq(schema.intents.intentId, 'i1'))
+  assert.equal((await authorizeTrade(db, trade(agentId, 1), BIG)).ok, true)
+})
+
+test('the cooldown spaces out trades, even after a failed one', async () => {
+  const db = await freshDb()
+  const { agentId } = await seedAgent(db)
+  const t0 = Date.now()
+  const opts = { cooldownMs: 60_000 }
+  const first = await authorizeTrade(db, trade(agentId, 1), BIG, t0, opts)
+  assert.ok(first.ok)
+  await releaseReservation(db, first.reservationId)
+  assert.deepEqual(await authorizeTrade(db, trade(agentId, 1), BIG, t0 + 59_000, opts), {
+    ok: false,
+    reason: 'cooldown',
+  })
+  assert.equal((await authorizeTrade(db, trade(agentId, 1), BIG, t0 + 60_000, opts)).ok, true)
 })
 
 test('the daily cap is a rolling 24h window', async () => {
   const db = await freshDb()
-  const { agentId } = await seedAgent(db, {
-    perTradeCap: USDC(5),
-    roundTradeCap: USDC(5),
-    dailyCap: USDC(5),
-  })
+  const { agentId } = await seedAgent(db, { perTradeCap: USDC(5), dailyCap: USDC(5) })
   const t0 = Date.now()
-  assert.equal(
-    (await authorizeTrade(db, trade(agentId, USDC(5), { roundId: 1 }), BIG, t0)).ok,
-    true,
-  )
+  const spent = await authorizeTrade(db, trade(agentId, USDC(5), { roundId: 1 }), BIG, t0)
+  assert.ok(spent.ok)
+  await settleReservation(db, spent.reservationId)
   const sameDay = await authorizeTrade(db, trade(agentId, 1, { roundId: 2 }), BIG, t0 + 1000)
   assert.deepEqual(sameDay, { ok: false, reason: 'over_daily_cap' })
   const nextDay = await authorizeTrade(
@@ -173,7 +186,7 @@ async function seedRound(
 ) {
   await db
     .insert(schema.rounds)
-    .values({ id: 1, phase, epochId: 1, startsAt: 0, phaseEndsAt: 1 })
+    .values({ id: 1, phase, epochId: 1, startsAt: 0, phaseEndsAt: Date.now() + 600_000 })
     .onConflictDoNothing()
   const [entry] = await db
     .insert(schema.roundEntries)
@@ -192,7 +205,7 @@ test('predictions: gates and the same-human rule', async () => {
   const db = await freshDb()
   const bob = await seedAgent(db, { human: 'b0b', mode: 'trade' })
   const bobPredictor = await seedAgent(db, { human: 'b0b', mode: 'predict' })
-  const alice = await seedAgent(db, { human: 'a11ce', mode: 'predict', predictionsPerRound: 1 })
+  const alice = await seedAgent(db, { human: 'a11ce', mode: 'predict', predictionsPerDay: 1 })
   const traderOnly = await seedAgent(db, { human: 'c0de', mode: 'trade' })
   const entryId = await seedRound(db, bob.agentId)
 
@@ -217,6 +230,7 @@ test('predictions: gates and the same-human rule', async () => {
     side: 'YES',
     probYesBps: 6000,
     canonicalJson: '{}',
+    createdAt: Date.now(),
   })
   assert.equal(await reason(alice.agentId), 'already_predicted')
 
@@ -233,6 +247,11 @@ test('predictions: gates and the same-human rule', async () => {
     .returning()
   assert.equal(await reason(alice.agentId, entry2!.id), 'over_prediction_limit')
 
-  await db.update(schema.rounds).set({ phase: 'TRADING' }).where(eq(schema.rounds.id, 1))
+  await db.update(schema.rounds).set({ phaseEndsAt: 1 }).where(eq(schema.rounds.id, 1)) // expired
+  assert.equal(await reason(bobPredictor.agentId, entry2!.id), 'predictions_closed')
+  await db
+    .update(schema.rounds)
+    .set({ phase: 'TRADING', phaseEndsAt: Date.now() + 600_000 })
+    .where(eq(schema.rounds.id, 1))
   assert.equal(await reason(bobPredictor.agentId, entry2!.id), 'predictions_closed')
 })

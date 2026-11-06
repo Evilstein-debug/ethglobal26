@@ -58,7 +58,7 @@ const cfg: RoundConfig = {
   epoch: { budget: 5_000_000, minEntries: 1, minPredictions: 1 },
   maxTradeDecisions: 2,
 }
-const policy = { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20', predictionsPerRound: 5 }
+const policy = { perTradeCap: '5', dailyCap: '20', predictionsPerDay: 5 }
 
 async function arena() {
   const w = await startAnvilWorld()

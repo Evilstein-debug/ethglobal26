@@ -197,7 +197,7 @@ async function run() {
     body: {
       name: 'Alpha',
       mode: 'both',
-      policy: { perTradeCap: '5', roundTradeCap: '10', dailyCap: '20' },
+      policy: { perTradeCap: '5', dailyCap: '20' },
     },
   })
   assert(created.status === 201, `create agent: ${JSON.stringify(created.body)}`)
@@ -326,7 +326,7 @@ async function run() {
     body: {
       name: 'Beta',
       mode: 'predict',
-      policy: { perTradeCap: '1', roundTradeCap: '1', dailyCap: '1' },
+      policy: { perTradeCap: '1', dailyCap: '1' },
     },
   })
   assert(beta.status === 201, `create Beta: ${JSON.stringify(beta.body)}`)

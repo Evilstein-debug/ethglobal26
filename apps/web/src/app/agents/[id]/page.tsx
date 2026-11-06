@@ -174,9 +174,9 @@ export default function AgentPage() {
         </p>
         {agent.policy && (
           <p className="text-xs text-muted">
-            Limits: {agent.policy.perTradeCap} / trade · {agent.policy.roundTradeCap} / round ·{' '}
-            {agent.policy.dailyCap} / day USDC · assets {agent.policy.tokenAllowlist.join(', ')} ·{' '}
-            {agent.policy.predictionsPerRound} predictions / round
+            Limits: {agent.policy.perTradeCap} / trade · {agent.policy.dailyCap} / day USDC · assets{' '}
+            {agent.policy.tokenAllowlist.join(', ')} · {agent.policy.predictionsPerDay} predictions
+            / day
           </p>
         )}
         <p className="text-xs text-muted">
