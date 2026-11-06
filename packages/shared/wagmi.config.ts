@@ -1,5 +1,5 @@
 /**
- * `pnpm codegen` runs this: it rebuilds the Foundry project and writes typed ABIs (`as const`)
+ * `pnpm codegen` builds the Foundry project, then this writes typed ABIs (`as const`)
  * plus deployed addresses to src/generated.ts. Never edit generated.ts by hand.
  * Docs: https://wagmi.sh/cli/api/plugins/foundry
  */
@@ -50,6 +50,9 @@ export default defineConfig({
       // any of our files that share a name with forge-std's (e.g. MockERC20.sol).
       exclude: [],
       deployments: readDeployments(),
+      // The plugin runs `forge build --root <path>` through a shell, unquoted, which breaks on
+      // paths with spaces. The codegen script builds with forge first instead.
+      forge: { build: false, rebuild: false },
     }),
   ],
 })

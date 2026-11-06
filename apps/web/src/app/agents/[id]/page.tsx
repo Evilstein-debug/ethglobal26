@@ -131,7 +131,14 @@ export default function AgentPage() {
   const { data: agent, error } = useApi<AgentView>(`/api/agents/${id}`, 10_000)
   const { data: activity } = useApi<{
     decisions: Decision[]
-    stats: { role: string; rounds: number; wins: number; losses: number; voids: number }[]
+    stats: {
+      role: string
+      rounds: number
+      wins: number
+      losses: number
+      voids: number
+      replay: boolean
+    }[]
   }>(`/api/agents/${id}/activity`, 10_000)
   const { data: history } = useApi<{ intents: Intent[] }>(`/api/agents/${id}/intents`, 10_000)
   if (error) return <Empty>Agent not found.</Empty>
@@ -175,6 +182,11 @@ export default function AgentPage() {
             .map((s) => `${s.role}: ${s.wins}W ${s.losses}L ${s.voids} void over ${s.rounds}`)
             .join(' · ') || 'No resolved rounds yet.'}
         </p>
+        {activity?.stats.some((s) => s.replay) && (
+          <p className="text-xs text-bad">
+            Replay: this record is sample data, not results of real trades or predictions.
+          </p>
+        )}
       </Panel>
 
       {isOwner && <OwnerControls agent={agent} />}

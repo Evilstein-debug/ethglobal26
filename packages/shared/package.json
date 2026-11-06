@@ -11,10 +11,11 @@
     "./generated": "./src/generated.ts",
     "./schemas": "./src/schemas.ts",
     "./tokens": "./src/tokens.ts",
-    "./auth": "./src/auth.ts"
+    "./auth": "./src/auth.ts",
+    "./verify": "./src/verify.ts"
   },
   "scripts": {
-    "codegen": "wagmi generate",
+    "codegen": "forge build --root ../contracts && wagmi generate",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

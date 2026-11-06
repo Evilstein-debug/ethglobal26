@@ -20,7 +20,9 @@
     "build:contracts": "pnpm --filter @starter/contracts build",
     "deploy:local": "pnpm --filter @starter/contracts deploy:local && pnpm codegen",
     "deploy:base": "pnpm --filter @starter/contracts deploy:base && pnpm codegen",
-    "e2e:happy": "tsx --env-file-if-exists=.env scripts/e2e-happy.ts"
+    "e2e:happy": "tsx --env-file-if-exists=.env scripts/e2e-happy.ts",
+    "verify": "tsx --env-file-if-exists=.env scripts/verify.ts",
+    "seed:replay": "tsx --env-file-if-exists=.env scripts/seed-replay.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

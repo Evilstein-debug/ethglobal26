@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import type { AddressInfo } from 'node:net'
+import { after, describe, test } from 'node:test'
 import { LocalLLMStub } from '@starter/zerog'
 import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
+import { verifyEntry, type EntryBundle } from '@starter/shared/verify'
 import { eq } from 'drizzle-orm'
 import type { Address } from 'viem'
+import { createApp } from '../app'
 import { localModel } from '../brain/local-model'
 import { TRADE_SYSTEM } from '../brain/prompts'
 import { schema } from '../db'
 import { allocateAwards } from '../rewards/epoch'
 import { createAgent, updatePolicy } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
+import { startPredictionIndexer } from './indexer'
 import { brier } from './resolver'
 import { tick, type RoundConfig } from './scheduler'
 
@@ -147,6 +151,99 @@ describe('rounds on anvil', { skip: skipReason }, () => {
       args: [w.bob.wallet],
     })
     assert.equal(bobUsdc, 2_000_000n)
+
+    // The indexer records the owner's claim tx.
+    const stop = startPredictionIndexer(w.ctx, 20)
+    for (let i = 0; i < 100; i++) {
+      const [award] = await w.db
+        .select()
+        .from(schema.rewardAwards)
+        .where(eq(schema.rewardAwards.ownerWallet, w.bob.wallet.toLowerCase()))
+      if (award?.claimTx === hash) break
+      assert.ok(i < 99, 'claim tx indexed')
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    stop()
+  })
+
+  test('verifyEntry: an honest entry passes; each tampered claim fails its step', async () => {
+    const w = await arena()
+    await tick(w.ctx, cfg)
+    w.at(1000)
+    await tick(w.ctx, cfg)
+    w.at(2000)
+    await tick(w.ctx, cfg)
+    w.stub.setPrice(3100)
+    w.at(3000)
+    await tick(w.ctx, cfg)
+
+    const server = createApp(w.ctx).listen(0)
+    after(() => server.close())
+    const { port } = server.address() as AddressInfo
+    const res = await fetch(`http://127.0.0.1:${port}/api/entries/1`)
+    const bundle = (await res.json()) as EntryBundle
+    const verify = async (mutate: (b: EntryBundle) => void = () => undefined) => {
+      const copy = structuredClone(bundle)
+      mutate(copy)
+      const report = await verifyEntry(copy, w.publicClient, { chainId: w.ctx.chain.id })
+      return { report, failed: report.steps.filter((s) => s.status === 'fail').map((s) => s.id) }
+    }
+
+    const honest = await verify()
+    assert.deepEqual(honest.failed, [], JSON.stringify(honest.report.steps))
+    assert.equal(honest.report.ok, true)
+    // Anvil has no real fills or TEE: those steps never report a pass here.
+    assert.deepEqual(
+      honest.report.steps.filter((s) => s.status === 'skip').map((s) => s.id),
+      ['commit-before-fill', 'fills-onchain', 'decisions'],
+    )
+
+    assert.deepEqual(
+      (
+        await verify((b) => {
+          b.intents[0]!.usdcReceived! += 1_000_000 // inflate the exit
+        })
+      ).failed,
+      ['pnl'],
+    )
+    assert.deepEqual(
+      (
+        await verify((b) => {
+          b.entry.outcome = 'NO'
+        })
+      ).failed,
+      ['entry-onchain', 'pnl', 'brier'],
+    )
+    assert.deepEqual(
+      (
+        await verify((b) => {
+          b.intents[0]!.canonicalJson = b.intents[0]!.canonicalJson.replace('WETH', 'PEPE')
+        })
+      ).failed,
+      ['commits'],
+    )
+    assert.ok(
+      (
+        await verify((b) => {
+          b.intents = [] // hide the trade
+        })
+      ).failed.includes('commits'),
+    )
+    assert.deepEqual(
+      (
+        await verify((b) => {
+          b.predictions[0]!.probYesBps = 9_900 // rewrite a prediction after the fact
+        })
+      ).failed,
+      ['predictions-closed', 'brier'],
+    )
+    assert.ok(
+      (
+        await verify((b) => {
+          b.round.lockTx = b.entry.openTx // a tx that isn't the lock
+        })
+      ).failed.includes('predictions-closed'),
+    )
   })
 
   test('a trader that never trades is VOID; its predictions are not scored', async () => {

@@ -112,6 +112,10 @@ export function arenaRouter(ctx: AppContext) {
         .select()
         .from(schema.agents)
         .where(eq(schema.agents.id, entry.traderAgentId))
+      const [round] = await ctx.db
+        .select()
+        .from(schema.rounds)
+        .where(eq(schema.rounds.id, entry.roundId))
       const intents = await ctx.db
         .select()
         .from(schema.intents)
@@ -143,7 +147,9 @@ export function arenaRouter(ctx: AppContext) {
             .where(inArray(schema.decisions.id, decisionIds))
         : []
       res.json({
+        chainId: ctx.chain.id,
         entry,
+        round: round && { id: round.id, phase: round.phase, lockTx: round.lockTx },
         trader: trader && {
           id: trader.id,
           name: trader.name,
@@ -212,8 +218,12 @@ export function arenaRouter(ctx: AppContext) {
             wins: t.wins,
             losses: t.losses,
             voids: t.voids,
-            netReturnPct:
-              t.spent && Number(t.spent) > 0 ? (Number(t.pnl) / Number(t.spent)) * 100 : null,
+            // Replay rows have no fills: mean return per scored round, from the labeled seed.
+            netReturnPct: t.replay
+              ? t.pnl_bps_total / Math.max(1, t.wins + t.losses) / 100
+              : t.spent && Number(t.spent) > 0
+                ? (Number(t.pnl) / Number(t.spent)) * 100
+                : null,
             realizedPnlUsdc: t.pnl == null ? 0 : Number(t.pnl) / 1e6,
           }))
           .sort((a, b) => (b.netReturnPct ?? -Infinity) - (a.netReturnPct ?? -Infinity)),

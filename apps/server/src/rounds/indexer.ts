@@ -1,13 +1,14 @@
 /**
  * Indexes owners' manual predictions. Owners call Arena.predict from their own wallet in the
  * browser; this polls `Predicted` events (block cursor, like the starter's feed) and stores the
- * ones made by owner wallets (agent predictions are stored when the agent submits them).
+ * ones made by owner wallets (agent predictions are stored when the agent submits them). It also
+ * stores the tx of each reward claim, which owners likewise send from their own wallet.
  */
 import { randomUUID } from 'node:crypto'
 import { canonicalJson } from '@starter/shared/canonical'
 import { arenaAbi } from '@starter/shared/generated'
 import { predictionSchema } from '@starter/shared/schemas'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getAddress, parseEventLogs } from 'viem'
 import type { AppContext } from '../context'
 import { schema } from '../db'
@@ -67,6 +68,17 @@ export function startPredictionIndexer(ctx: AppContext, everyMs = 3000) {
           predictTx: log.transactionHash,
         })
         .onConflictDoNothing()
+    }
+    for (const log of parseEventLogs({ abi: arenaAbi, eventName: 'Claimed', logs })) {
+      await ctx.db
+        .update(schema.rewardAwards)
+        .set({ claimTx: log.transactionHash })
+        .where(
+          and(
+            eq(schema.rewardAwards.epochId, Number(log.args.epoch)),
+            eq(schema.rewardAwards.humanId, log.args.humanId),
+          ),
+        )
     }
     cursor = toBlock + 1n
   }
