@@ -10,6 +10,9 @@ import type { Db } from './db'
 import type { KeyBox } from './wallets/keybox'
 
 /** Everything a route or worker needs. Built once in index.ts; tests build their own. */
+/** LOCAL ANVIL ONLY: what one click of the dev faucet gives a wallet. */
+export const DEV_FAUCET = { usdc: '1000', eth: '20' }
+
 export type AppContext = {
   db: Db
   chain: Chain

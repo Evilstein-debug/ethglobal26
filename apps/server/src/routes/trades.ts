@@ -3,7 +3,7 @@ import { Router, type Request } from 'express'
 import { getAddress, isAddress } from 'viem'
 import { z } from 'zod'
 import { ownerAuth, walletOf } from '../auth/owner-auth'
-import type { AppContext } from '../context'
+import { DEV_FAUCET, type AppContext } from '../context'
 import { schema } from '../db'
 import { closePosition } from '../execution/close'
 import { executeTrade, newIntentId } from '../execution/trade'
@@ -116,8 +116,7 @@ export function tradesRouter(ctx: AppContext) {
         if (!isAddress(address, { strict: false })) throw new HttpError(400, 'invalid_address')
         res.json({
           ...(await faucet(getAddress(address))),
-          usdc: '100',
-          eth: '1',
+          ...DEV_FAUCET,
           note: 'local anvil test funds',
         })
       }),

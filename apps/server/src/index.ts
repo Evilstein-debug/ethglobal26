@@ -19,7 +19,7 @@ import { devHumanVerifier, worldHumanVerifier, type HumanVerifier } from './auth
 import { chain, pollingInterval, publicClient, rpcUrl } from './chain/client'
 import { contractsOn } from './chain/contracts'
 import { createArenaOps } from './chain/operator'
-import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from './context'
+import { DEFAULT_BRAIN, DEV_FAUCET, type AppContext, type FlashSetup } from './context'
 import { ZeroGClient, type LLMClient } from '@starter/zerog'
 import { localModel } from './brain/local-model'
 import { newsReader } from './brain/news'
@@ -158,9 +158,9 @@ function localFaucet() {
       address: contracts.usdc,
       abi: mockUsdcAbi,
       functionName: 'mint',
-      args: [to, parseUnits('100', 6)],
+      args: [to, parseUnits(DEV_FAUCET.usdc, 6)],
     })
-    const ethTx = await operator.sendTransaction({ to, value: parseEther('1') })
+    const ethTx = await operator.sendTransaction({ to, value: parseEther(DEV_FAUCET.eth) })
     for (const hash of [usdcTx, ethTx]) await client.waitForTransactionReceipt({ hash })
     return { usdcTx, ethTx }
   }

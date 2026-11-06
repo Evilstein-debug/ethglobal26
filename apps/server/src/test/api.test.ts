@@ -356,6 +356,7 @@ test('dev faucet exists only with local dev tools and validates the address', as
   })
   assert.equal(ok.status, 200)
   assert.deepEqual(sent, [user(5).address])
+  assert.deepEqual([ok.body.usdc, ok.body.eth], ['1000', '20'])
   assert.equal(
     (await call(base, 'POST', '/api/dev/faucet', { body: { address: 'nope' } })).body.error,
     'invalid_address',
