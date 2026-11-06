@@ -21,6 +21,9 @@ export type TxState =
 function describeError(error: unknown) {
   if (error instanceof BaseError) {
     if (error.walk((e) => e instanceof UserRejectedRequestError)) return 'Rejected in wallet'
+    // OpenZeppelin ERC20 custom errors (not in viem's erc20Abi).
+    if (error.message.includes('0xe450d38c')) return 'Insufficient token balance in your wallet'
+    if (error.message.includes('0xfb8f41b2')) return 'Insufficient token allowance'
     return error.shortMessage
   }
   return error instanceof Error ? error.message : String(error)

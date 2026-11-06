@@ -1,5 +1,14 @@
 import { FlashClient, LocalFlashStub } from '@starter/flash'
-import type { Address, PublicClient } from 'viem'
+import { mockUsdcAbi } from '@starter/shared/generated'
+import {
+  createWalletClient,
+  http,
+  parseEther,
+  parseUnits,
+  type Address,
+  type PublicClient,
+} from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 import { createApp } from './app'
 import { rpSignature } from '@starter/world'
 import { devHumanVerifier, worldHumanVerifier, type HumanVerifier } from './auth/human'
@@ -105,6 +114,27 @@ function llm(): LLMClient | undefined {
   return undefined
 }
 
+/** LOCAL ANVIL ONLY: the operator (a funded anvil dev account) mints mock USDC and sends ETH. */
+function localFaucet() {
+  const operator = createWalletClient({
+    account: privateKeyToAccount(env.operatorKey),
+    chain,
+    transport: http(rpcUrl),
+    pollingInterval,
+  })
+  return async (to: Address) => {
+    const usdcTx = await operator.writeContract({
+      address: contracts.usdc,
+      abi: mockUsdcAbi,
+      functionName: 'mint',
+      args: [to, parseUnits('100', 6)],
+    })
+    const ethTx = await operator.sendTransaction({ to, value: parseEther('1') })
+    for (const hash of [usdcTx, ethTx]) await client.waitForTransactionReceipt({ hash })
+    return { usdcTx, ethTx }
+  }
+}
+
 const ctx: AppContext = {
   db,
   chain,
@@ -146,6 +176,7 @@ const ctx: AppContext = {
     maxTradeDecisions: 2,
   },
   devTools: env.isLocal,
+  devFaucet: env.isLocal ? localFaucet() : undefined,
   brain: { ...DEFAULT_BRAIN, minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct },
   now: Date.now,
 }

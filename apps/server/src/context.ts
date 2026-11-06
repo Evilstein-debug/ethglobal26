@@ -37,6 +37,8 @@ export type AppContext = {
   }
   /** LOCAL ANVIL ONLY: enables /api/dev/* helpers (stub price, manual round tick). */
   devTools?: boolean
+  /** LOCAL ANVIL ONLY: mint mock USDC and send ETH to an address (dev faucet). */
+  devFaucet?: (to: Address) => Promise<{ usdcTx: string; ethTx: string }>
   now: () => number
 }
 

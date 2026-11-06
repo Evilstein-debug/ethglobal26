@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm'
 import { Router, type Request } from 'express'
-import { getAddress } from 'viem'
+import { getAddress, isAddress } from 'viem'
 import { z } from 'zod'
 import { ownerAuth, walletOf } from '../auth/owner-auth'
 import type { AppContext } from '../context'
@@ -105,6 +105,24 @@ export function tradesRouter(ctx: AppContext) {
       }),
     )
   }
+  /** LOCAL TEST ONLY: test funds for any wallet (mock USDC + ETH on anvil). */
+  const faucet = ctx.devFaucet
+  if (ctx.devTools && faucet) {
+    r.post(
+      '/dev/faucet',
+      handler(async (req, res) => {
+        const { address } = z.object({ address: z.string() }).parse(req.body)
+        if (!isAddress(address, { strict: false })) throw new HttpError(400, 'invalid_address')
+        res.json({
+          ...(await faucet(getAddress(address))),
+          usdc: '100',
+          eth: '1',
+          note: 'local anvil test funds',
+        })
+      }),
+    )
+  }
+
   /** LOCAL TEST ONLY: run one scheduler tick now (used by e2e with the timer disabled). */
   if (ctx.devTools && ctx.rounds) {
     const rounds = ctx.rounds

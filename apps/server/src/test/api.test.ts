@@ -341,3 +341,29 @@ test('replay rows are labeled, keyless, inactive and removable', async () => {
   assert.equal((await db.select().from(schema.agentStats)).length, 0)
   assert.equal((await db.select().from(schema.owners)).length, 0)
 })
+
+test('dev faucet exists only with local dev tools and validates the address', async () => {
+  const sent: string[] = []
+  const { base } = await startApi(await freshDb(), {
+    devTools: true,
+    devFaucet: async (to) => {
+      sent.push(to)
+      return { usdcTx: '0x1', ethTx: '0x2' }
+    },
+  })
+  const ok = await call(base, 'POST', '/api/dev/faucet', {
+    body: { address: user(5).address.toLowerCase() },
+  })
+  assert.equal(ok.status, 200)
+  assert.deepEqual(sent, [user(5).address])
+  assert.equal(
+    (await call(base, 'POST', '/api/dev/faucet', { body: { address: 'nope' } })).body.error,
+    'invalid_address',
+  )
+  const { base: prodLike } = await startApi(await freshDb())
+  assert.equal(
+    (await call(prodLike, 'POST', '/api/dev/faucet', { body: { address: user(5).address } }))
+      .status,
+    404,
+  )
+})
