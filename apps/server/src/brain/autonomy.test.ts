@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { LocalLLMStub } from '@starter/zerog'
 import { candleReader, parseCandles, summarizeCandles, type Candle } from './candles'
 import { describeDecision, type MemoryRow } from './memory'
 import { checkMove, type WatchState } from './watcher'
-import { createAgent, getAgent } from '../services/agents'
-import { skipReason, startAnvilWorld } from '../test/anvil'
-import { think } from './decide'
-import type { MarketConfig } from '../rounds/scheduler'
 
 /** n candles of `step` seconds starting at price p0 and rising `drift` per candle. */
 function series(n: number, step: number, p0: number, drift: number): Candle[] {
@@ -155,53 +150,5 @@ describe('price watcher', () => {
     assert.equal(checkMove(s, 0, 1, opts), null)
     assert.equal(checkMove(s, Number.NaN, 1, opts), null)
     assert.equal(s.refPrice, null)
-  })
-})
-
-describe('the agent sees context and remembers, on anvil', { skip: skipReason }, () => {
-  const cfg: MarketConfig = {
-    predictionWindowMs: 60_000,
-    maxHoldMs: 600_000,
-    thinkEveryMs: 0,
-    minGasWei: 1n,
-    closeGraceMs: 300_000,
-    epochMs: 3_600_000,
-    epoch: { budget: 5_000_000, minEntries: 1, minPredictions: 1 },
-  }
-
-  test('candles reach the prompt, and the next thought remembers the last one', async () => {
-    const w = await startAnvilWorld()
-    const seen: { market: Record<string, unknown>; memory: { recentDecisions: unknown[] } }[] = []
-    w.ctx.llm = new LocalLLMStub((req) => {
-      const m = /<<<DATA\n([\s\S]*)\nDATA>>>/.exec(req.user)
-      seen.push(JSON.parse(m![1]!))
-      return JSON.stringify({ action: 'wait', rationale: 'watching the range' })
-    })
-    // Fake candles from a test reader: the real feed is never called in tests.
-    w.ctx.readCandles = async () => ({
-      hourly: series(24, 3600, 3000, 1),
-      fiveMin: series(12, 300, 3020, 0.5),
-    })
-    const owner = await w.owner(`bob${Math.random().toString(36).slice(2, 8)}`)
-    const created = await createAgent(w.ctx, owner.wallet, {
-      name: 'Alpha',
-      mode: 'trade',
-      policy: { perTradeCap: '5', dailyCap: '20', predictionsPerDay: 5 },
-    })
-    await w.fund(created.address as `0x${string}`, '20')
-    const agent = await getAgent(w.ctx, created.id)
-
-    const first = await think(w.ctx, agent, cfg)
-    assert.equal(first.action, 'wait', JSON.stringify(first))
-    assert.deepEqual(seen[0]!.memory.recentDecisions, [])
-    const candles = seen[0]!.market.candles as { source: string; change24hPct: number }
-    assert.match(candles.source, /Coinbase/)
-    assert.ok(candles.change24hPct > 0)
-
-    await think(w.ctx, agent, cfg)
-    const remembered = seen[1]!.memory.recentDecisions as { did: string; why: string }[]
-    assert.equal(remembered.length, 1)
-    assert.equal(remembered[0]!.did, 'wait')
-    assert.equal(remembered[0]!.why, 'watching the range')
   })
 })

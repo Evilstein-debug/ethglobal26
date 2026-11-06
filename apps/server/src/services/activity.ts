@@ -8,7 +8,7 @@ import type { AppContext } from '../context'
 import { schema } from '../db'
 
 export type AgentState = (typeof schema.AGENT_STATES)[number]
-type LogFields = { rationale?: string; decisionId?: string; entryId?: number }
+type LogFields = { rationale?: string; decisionId?: string; entryId?: number; detail?: string }
 
 export async function logActivity(
   ctx: AppContext,
@@ -22,6 +22,7 @@ export async function logActivity(
     state,
     message: message.slice(0, 500),
     rationale: fields.rationale?.slice(0, 500) ?? null,
+    detail: fields.detail?.slice(0, 4000) ?? null,
     decisionId: fields.decisionId ?? null,
     entryId: fields.entryId ?? null,
     createdAt: ctx.now(),
@@ -33,9 +34,9 @@ export async function setStatus(
   agentId: string,
   state: AgentState,
   detail: string,
-  opts: LogFields & { nextThinkAt?: number } = {},
+  opts: LogFields & { nextThinkAt?: number; silent?: boolean } = {},
 ) {
-  const { nextThinkAt, ...fields } = opts
+  const { nextThinkAt, silent, ...fields } = opts
   const [current] = await ctx.db
     .select()
     .from(schema.agentStatus)
@@ -50,7 +51,9 @@ export async function setStatus(
     .insert(schema.agentStatus)
     .values({ agentId, ...row })
     .onConflictDoUpdate({ target: schema.agentStatus.agentId, set: row })
-  if (current?.state !== state || current.detail !== row.detail) {
+  // `silent`: update the status card only. The caller logs the feed line itself, so a repeat
+  // (the same "decided to wait" with new reasoning) is never swallowed by the dedup below.
+  if (!silent && (current?.state !== state || current.detail !== row.detail)) {
     await logActivity(ctx, agentId, state, detail, fields)
   }
 }

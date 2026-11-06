@@ -216,6 +216,7 @@ const ctx: AppContext = {
     ...DEFAULT_BRAIN,
     minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct,
     tradeCooldownMs: env.markets.cooldownMs,
+    maxSteps: env.markets.maxSteps,
   },
   now: Date.now,
 }

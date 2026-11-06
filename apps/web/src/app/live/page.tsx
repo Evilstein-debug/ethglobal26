@@ -22,6 +22,7 @@ type ActivityEvent = {
   state: string
   message: string
   rationale: string | null
+  detail: string | null
   entryId: number | null
   at: number
   decision: {
@@ -29,6 +30,8 @@ type ActivityEvent = {
     teeVerified: boolean | null
     accepted: boolean | null
     rejectReason: string | null
+    model: string | null
+    latencyMs: number | null
   } | null
 }
 type Activity = { serverTime: number; agents: AgentNow[]; events: ActivityEvent[] }
@@ -46,14 +49,30 @@ const STATE_LABEL: Record<string, string> = {
   paused: 'Paused',
   broadcast: 'Broadcast',
   resolved: 'Resolved',
+  thought: 'Thought',
+  tool_call: 'Tool call',
+  tool_result: 'Tool result',
 }
 const BUSY = ['reading_news', 'thinking', 'trading', 'predicting']
+/** The agent's reasoning steps within one thought: drawn indented under the thought they belong to. */
+const STEPS = ['thought', 'tool_call', 'tool_result']
 
 const label = (state: string) => STATE_LABEL[state] ?? state
 
 function tone(state: string) {
   if (state === 'error' || state === 'needs_funds') return 'bad' as const
-  return BUSY.includes(state) || state === 'broadcast' ? ('ok' as const) : ('muted' as const)
+  return BUSY.includes(state) || state === 'broadcast' || state === 'tool_call'
+    ? ('ok' as const)
+    : ('muted' as const)
+}
+
+/** A tool result's JSON, indented for reading; falls back to the raw text. */
+function pretty(text: string) {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text
+  }
 }
 
 function AgentCard({ agent, serverTime }: { agent: AgentNow; serverTime: number }) {
@@ -85,6 +104,8 @@ function Decision({ d }: { d: NonNullable<ActivityEvent['decision']> }) {
   return (
     <span className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted">
       <span title={d.requestId}>0G {short(d.requestId)}</span>
+      {d.model && <span>{d.model}</span>}
+      {d.latencyMs != null && <span>{(d.latencyMs / 1000).toFixed(1)}s</span>}
       {d.teeVerified === true && <Badge tone="ok">TEE verified</Badge>}
       {d.teeVerified !== true && <Badge>no TEE</Badge>}
       {d.accepted === false && (
@@ -95,15 +116,32 @@ function Decision({ d }: { d: NonNullable<ActivityEvent['decision']> }) {
 }
 
 function Row({ e }: { e: ActivityEvent }) {
+  const step = STEPS.includes(e.state)
   return (
-    <li className="flex flex-col gap-1 border-b border-line py-3 last:border-0">
+    <li
+      className={`flex flex-col gap-1 border-b border-line py-3 last:border-0 ${
+        step ? 'ml-4 border-l-2 border-l-line pl-3' : ''
+      }`}
+    >
       <div className="flex flex-wrap items-baseline gap-2 text-sm">
         <span className="font-mono text-xs text-muted">{new Date(e.at).toLocaleTimeString()}</span>
         <Link href={`/agents/${e.agentId}`} className="font-semibold">
           {e.agentName}
         </Link>
         <Badge tone={tone(e.state)}>{label(e.state)}</Badge>
-        <span>{e.message}</span>
+        <span
+          className={
+            e.state === 'tool_call'
+              ? 'font-mono text-xs'
+              : e.state === 'thought'
+                ? 'italic text-muted'
+                : e.state === 'tool_result'
+                  ? 'font-mono text-xs text-muted'
+                  : ''
+          }
+        >
+          {e.message}
+        </span>
         {e.entryId != null && (
           <Link href={`/entries/${e.entryId}`} className="text-xs underline">
             View entry
@@ -111,6 +149,14 @@ function Row({ e }: { e: ActivityEvent }) {
         )}
       </div>
       {e.rationale && <p className="text-sm text-muted">“{e.rationale}”</p>}
+      {e.detail && (
+        <details className="text-xs text-muted">
+          <summary className="cursor-pointer">Full result</summary>
+          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all border border-line p-2 font-mono">
+            {pretty(e.detail)}
+          </pre>
+        </details>
+      )}
       {e.decision && <Decision d={e.decision} />}
     </li>
   )
@@ -131,8 +177,9 @@ export default function LivePage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-muted">
-          Agents act on their own. Everything they read, think and do shows up here as it happens,
-          including their reasoning and any decision the guardrails rejected.
+          Agents act on their own. Everything they think, every tool they ask for and what came
+          back, and every decision the guardrails rejected shows up here as it happens. Indented
+          rows are the steps inside one thought.
         </p>
         {address && (
           <Button variant="outline" onClick={() => setMine(!mine)}>

@@ -58,6 +58,7 @@ export async function recentMemory(ctx: AppContext, agentId: string, limit = 5) 
         left join intents i on i.decision_id = d.id
         left join round_entries e on e.id = i.entry_id
         where d.agent_id = ${agentId} and d.accepted = true
+          and (d.reject_reason is null or d.reject_reason <> 'tool_step')
         order by d.created_at desc
         limit ${limit}`,
   )

@@ -151,23 +151,26 @@ export function arenaRouter(ctx: AppContext) {
         state: string
         message: string
         rationale: string | null
+        detail: string | null
         entry_id: number | null
         created_at: string
         request_id: string | null
         tee_verified: boolean | null
         accepted: boolean | null
         reject_reason: string | null
+        model: string | null
+        latency_ms: string | null
       }>(
         ctx.db,
         sql`select v.id, v.agent_id, a.name as agent_name, v.state, v.message, v.rationale,
-                   v.entry_id, v.created_at,
-                   d.request_id, d.tee_verified, d.accepted, d.reject_reason
+                   v.detail, v.entry_id, v.created_at,
+                   d.request_id, d.tee_verified, d.accepted, d.reject_reason, d.model, d.latency_ms
             from agent_activity v
             join agents a on a.id = v.agent_id
             left join decisions d on d.id = v.decision_id
             where ${mine}
             order by v.id desc
-            limit 100`,
+            limit 200`,
       )
       res.json({
         serverTime: ctx.now(),
@@ -189,6 +192,7 @@ export function arenaRouter(ctx: AppContext) {
           state: e.state,
           message: e.message,
           rationale: e.rationale,
+          detail: e.detail,
           entryId: e.entry_id,
           at: Number(e.created_at),
           decision: e.request_id && {
@@ -196,6 +200,8 @@ export function arenaRouter(ctx: AppContext) {
             teeVerified: e.tee_verified,
             accepted: e.accepted,
             rejectReason: e.reject_reason,
+            model: e.model,
+            latencyMs: e.latency_ms == null ? null : Number(e.latency_ms),
           },
         })),
       })

@@ -245,6 +245,15 @@ export const AGENT_STATES = [
   'error',
 ] as const
 
+/** Feed-only row kinds: an agent's reasoning steps, and broadcast/resolve events. */
+export const ACTIVITY_ONLY_STATES = [
+  'broadcast',
+  'resolved',
+  'thought',
+  'tool_call',
+  'tool_result',
+] as const
+
 /** What each agent is doing right now, and when it next thinks. */
 export const agentStatus = pgTable('agent_status', {
   agentId: text('agent_id')
@@ -264,10 +273,12 @@ export const agentActivity = pgTable(
     agentId: text('agent_id')
       .notNull()
       .references(() => agents.id),
-    state: text('state', { enum: [...AGENT_STATES, 'broadcast', 'resolved'] }).notNull(),
+    state: text('state', { enum: [...AGENT_STATES, ...ACTIVITY_ONLY_STATES] }).notNull(),
     message: text('message').notNull(),
     /** The model's own words, when this step came from a decision. */
     rationale: text('rationale'),
+    /** Longer text behind a row, e.g. a tool's full result. */
+    detail: text('detail'),
     decisionId: text('decision_id').references(() => decisions.id),
     entryId: integer('entry_id').references(() => roundEntries.id),
     createdAt: num('created_at').notNull(),

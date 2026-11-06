@@ -10,17 +10,16 @@ import { canonicalJson, idHash } from '@starter/shared/canonical'
 import { arenaAbi } from '@starter/shared/generated'
 import { predictionSchema } from '@starter/shared/schemas'
 import { and, eq, sql } from 'drizzle-orm'
-import { encodeFunctionData, getAddress, zeroHash, type Hash } from 'viem'
+import { encodeFunctionData, formatEther, formatUnits, getAddress, zeroHash, type Hash } from 'viem'
 import type { AppContext } from '../context'
 import { queryRows, schema } from '../db'
 import { executeTrade, newIntentId, type TradeResult } from '../execution/trade'
 import { authorizePrediction, authorizeTrade } from '../policy/authorize'
 import { reserveMarket, settleEmptyMarket, type MarketConfig } from '../rounds/scheduler'
-import { setStatus, type AgentState } from '../services/activity'
+import { logActivity, setStatus, type AgentState } from '../services/activity'
 import { agentSigner, balancesOf } from '../services/agents'
-import { summarizeCandles } from './candles'
-import { recentMemory } from './memory'
-import { dataBlock, THINK_SYSTEM } from './prompts'
+import { dataBlock, stepsBlock, THINK_SYSTEM, type Step } from './prompts'
+import { isToolName, runTool } from './tools'
 import { parseModelJson, validateThink, type PredictionDecision } from './validate'
 
 type AgentRow = typeof schema.agents.$inferSelect
@@ -59,10 +58,22 @@ async function record(
 }
 
 /** Ask the model. A failed 0G call that still has a request ID is recorded as rejected. */
-async function ask(ctx: AppContext, agentId: string, kind: Kind, system: string, data: unknown) {
+async function ask(
+  ctx: AppContext,
+  agentId: string,
+  kind: Kind,
+  system: string,
+  data: unknown,
+  /** Text after the DATA block, e.g. the steps taken so far in this thought. */
+  extra = '',
+) {
   if (!ctx.llm) return { ok: false as const, reason: 'llm_not_configured' }
   try {
-    const result = await ctx.llm.complete({ system, user: dataBlock(data), maxTokens: 4000 })
+    const result = await ctx.llm.complete({
+      system,
+      user: dataBlock(data) + extra,
+      maxTokens: 4000,
+    })
     return { ok: true as const, result, parsed: parseModelJson(result.output) }
   } catch (err) {
     if (err instanceof ZeroGError && err.trace?.requestId) {
@@ -180,18 +191,6 @@ async function openPosition(ctx: AppContext, agentId: string) {
   )
 }
 
-/** Flash's 24h numbers for the asset; null when Flash doesn't report them (e.g. the local stub). */
-function statsOf(asset?: { priceChange24h?: string; volume24h?: string; liquidity?: string }) {
-  const change = Number(asset?.priceChange24h)
-  if (!asset || asset.priceChange24h === undefined || !Number.isFinite(change)) return null
-  return {
-    source: 'Flash /search',
-    change24hPct: Math.round(change * 10_000) / 100,
-    volume24hUsd: Math.round(Number(asset.volume24h)) || null,
-    liquidityUsd: Math.round(Number(asset.liquidity)) || null,
-  }
-}
-
 const REFUSED: Record<string, string> = {
   position_open: 'Already holding a position',
   cooldown: 'Cooling down after its last trade',
@@ -221,7 +220,12 @@ export async function think(
 
   const policy = await policyOf(ctx, agent.id)
   const { usdc, eth } = await balancesOf(ctx, getAddress(agent.address))
-  if (eth < cfg.minGasWei) return stop('needs_funds', 'Needs ETH for gas before it can act')
+  if (eth < cfg.minGasWei) {
+    return stop(
+      'needs_funds',
+      `Needs ETH for gas: has ${formatEther(eth)} ETH, needs at least ${formatEther(cfg.minGasWei)}. Send ETH to ${agent.address}`,
+    )
+  }
 
   const trader = agent.mode !== 'predict'
   const predictor = agent.mode !== 'trade'
@@ -264,16 +268,17 @@ export async function think(
       return stop('watching_position', 'Watching its open position')
     }
     if (reason === 'cooldown') return stop('cooling_down', REFUSED.cooldown!)
-    if (trader && reason === 'insufficient_funds') return stop('needs_funds', REFUSED[reason]!)
+    if (trader && reason === 'insufficient_funds') {
+      return stop(
+        'needs_funds',
+        `Needs USDC to trade: has ${formatUnits(usdc, 6)} USDC, needs at least ${formatUnits(BigInt(b.minTrade), 6)}. Send USDC to ${agent.address}`,
+      )
+    }
     if (trader && maxSize < b.minTrade) return stop('idle', REFUSED.over_daily_cap!)
     if (reason === 'paused') return stop('idle', REFUSED.paused!)
     return stop('idle', 'No open markets to predict on')
   }
 
-  const news = canTrade ? await ctx.readNews() : null
-  if (news) {
-    await setStatus(ctx, agent.id, 'reading_news', `Reading ${news.items.length} headlines`)
-  }
   const options = [
     canTrade && 'a trade',
     canPredict && `${markets.length} open market${markets.length > 1 ? 's' : ''}`,
@@ -288,14 +293,11 @@ export async function think(
     },
     position: (await openPosition(ctx, agent.id)) ?? null,
     actions: { trade: canTrade, predict: canPredict },
-    market: {
-      asset: 'WETH',
-      livePriceUsd: livePrice || null,
-      stats24h: statsOf(asset[0]),
-      candles: canTrade && ctx.readCandles ? summarizeCandles(await ctx.readCandles()) : null,
-    },
-    memory: { recentDecisions: await recentMemory(ctx, agent.id) },
+    // Only the live price is handed over. History, news and the agent's own past are tools it
+    // chooses to call (brain/tools.ts), and every call shows up in the Live feed.
+    market: { asset: 'WETH', livePriceUsd: livePrice || null },
     limits: {
+      maxToolSteps: b.maxSteps,
       maxSizeUsdc: maxSize / 1e6,
       minRiskPct: b.minRiskPct,
       maxRiskPct: b.maxRiskPct,
@@ -305,13 +307,74 @@ export async function think(
       maxHoldMinutes: cfg.maxHoldMs / 60_000,
       maxPredictions,
     },
-    news,
     openMarkets: markets.map((m) => m.view),
   }
-  const res = await ask(ctx, agent.id, 'think', THINK_SYSTEM, data)
-  if (!res.ok) {
-    await setStatus(ctx, agent.id, 'error', `Model unavailable: ${res.reason}`, next)
-    return { action: 'unavailable', reason: res.reason }
+
+  // Think → (ask for a tool → see the result → think again) → decide. Each step is its own model
+  // call with its own 0G request ID, and its own rows in the feed.
+  const steps: Step[] = []
+  let res = await ask(ctx, agent.id, 'think', THINK_SYSTEM, data)
+  for (;;) {
+    if (!res.ok) {
+      await setStatus(ctx, agent.id, 'error', `Model unavailable: ${res.reason}`, next)
+      return { action: 'unavailable', reason: res.reason }
+    }
+    const out = (res.parsed ?? {}) as { thought?: unknown; tool?: unknown; args?: unknown }
+    if (out.tool === undefined) break
+    const thought =
+      typeof out.thought === 'string' ? out.thought.slice(0, 300) : '(no thought given)'
+    const stepNo = steps.length + 1
+    const decisionId = await record(
+      ctx,
+      agent.id,
+      0,
+      'think',
+      res.result,
+      stepNo <= b.maxSteps,
+      stepNo <= b.maxSteps ? 'tool_step' : 'too_many_steps',
+    )
+    await logActivity(ctx, agent.id, 'thought', thought, { decisionId })
+    if (stepNo > b.maxSteps) {
+      await setStatus(ctx, agent.id, 'idle', 'Asked for more tools than allowed', {
+        ...next,
+        silent: true,
+      })
+      await logActivity(ctx, agent.id, 'idle', 'Asked for more tools than allowed; no action taken')
+      return { action: 'rejected', reason: 'too_many_steps', decisionId }
+    }
+    const argsText = JSON.stringify(out.args ?? {})
+    await logActivity(ctx, agent.id, 'tool_call', `${String(out.tool)}(${argsText})`, {
+      decisionId,
+    })
+    await setStatus(ctx, agent.id, 'thinking', `Step ${stepNo}: ${String(out.tool)}`, {
+      silent: true,
+    })
+    const outcome = isToolName(out.tool)
+      ? await runTool(ctx, agent.id, out.tool, out.args)
+      : ({ ok: false, error: 'unknown_tool' } as const)
+    const observation = outcome.ok ? outcome.text : JSON.stringify({ error: outcome.error })
+    await logActivity(
+      ctx,
+      agent.id,
+      'tool_result',
+      outcome.ok ? observation.slice(0, 160) : `failed: ${outcome.error}`,
+      { decisionId, detail: observation },
+    )
+    steps.push({ thought, tool: String(out.tool), args: out.args, observation })
+    res = await ask(
+      ctx,
+      agent.id,
+      'think',
+      THINK_SYSTEM,
+      data,
+      stepsBlock(steps, steps.length >= b.maxSteps),
+    )
+  }
+
+  // The model's own words for the final action: its "rationale", else its "thought".
+  const final = res.parsed as Record<string, unknown> | undefined
+  if (final && typeof final === 'object' && typeof final.thought === 'string') {
+    if (typeof final.rationale !== 'string' || !final.rationale) final.rationale = final.thought
   }
 
   const v = validateThink(res.parsed, {
@@ -322,17 +385,18 @@ export async function think(
   })
   if (!v.ok) {
     const decisionId = await record(ctx, agent.id, 0, 'think', res.result, false, v.reason)
-    await setStatus(ctx, agent.id, 'idle', `Guardrails rejected its decision: ${v.reason}`, {
-      ...next,
-      decisionId,
-    })
+    const why = `Guardrails rejected its decision: ${v.reason}`
+    // Logged every time, even when the reason repeats: a rejection is never swallowed.
+    await setStatus(ctx, agent.id, 'idle', why, { ...next, decisionId, silent: true })
+    await logActivity(ctx, agent.id, 'idle', why, { decisionId })
     return { action: 'rejected', reason: v.reason, decisionId }
   }
 
   if (v.action === 'wait') {
     const decisionId = await record(ctx, agent.id, 0, 'think', res.result, true)
-    await setStatus(ctx, agent.id, 'idle', 'Decided to wait', {
-      ...next,
+    // Logged every time: each wait carries fresh reasoning, so the feed must not dedupe it away.
+    await setStatus(ctx, agent.id, 'idle', 'Decided to wait', { ...next, silent: true })
+    await logActivity(ctx, agent.id, 'idle', 'Decided to wait', {
       rationale: v.rationale,
       decisionId,
     })

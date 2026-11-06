@@ -64,6 +64,8 @@ export type BrainConfig = {
   minRewardRisk: number
   /** Minimum time between two trades of one agent. */
   tradeCooldownMs: number
+  /** How many tool calls an agent may make in one thought before it must decide. */
+  maxSteps: number
 }
 
 export const DEFAULT_BRAIN: BrainConfig = {
@@ -74,6 +76,7 @@ export const DEFAULT_BRAIN: BrainConfig = {
   maxTpPct: 0.1,
   minRewardRisk: 1,
   tradeCooldownMs: 0,
+  maxSteps: 4,
 }
 
 export type FlashSetup = {

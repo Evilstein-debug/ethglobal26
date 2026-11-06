@@ -96,15 +96,10 @@ describe('the agent decides for itself, on anvil', { skip: skipReason }, () => {
     assert.equal(intent!.entryRefPrice, '3000.00')
   })
 
-  test('every step is visible: news, thinking, trading, and the reasoning', async () => {
+  test('every step is visible: thinking, trading, and the reasoning', async () => {
     const w = await world()
     await think(w.ctx, w.trader, cfg)
-    assert.deepEqual(await activity(w, w.trader.id), [
-      'reading_news',
-      'thinking',
-      'trading',
-      'watching_position',
-    ])
+    assert.deepEqual(await activity(w, w.trader.id), ['thinking', 'trading', 'watching_position'])
     const rows = await w.db.select().from(schema.agentActivity)
     const trading = rows.find((a) => a.state === 'trading')!
     assert.match(trading.rationale!, /local stub/)
