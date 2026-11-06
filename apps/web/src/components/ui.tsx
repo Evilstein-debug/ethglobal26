@@ -49,3 +49,45 @@ export function Panel({
 }
 
 export const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`
+
+export function Badge({
+  children,
+  tone = 'muted',
+}: {
+  children: ReactNode
+  tone?: 'ok' | 'bad' | 'muted'
+}) {
+  const color =
+    tone === 'ok'
+      ? 'border-ok text-ok'
+      : tone === 'bad'
+        ? 'border-bad text-bad'
+        : 'border-line text-muted'
+  return (
+    <span className={`inline-block border px-1.5 py-0.5 font-mono text-[10px] uppercase ${color}`}>
+      {children}
+    </span>
+  )
+}
+
+export function Select({
+  label,
+  children,
+  ...props
+}: ComponentProps<'select'> & { label: string }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-xs text-muted uppercase tracking-widest">{label}</span>
+      <select
+        className="h-10 border border-line bg-transparent px-3 text-sm outline-none focus:border-fg"
+        {...props}
+      >
+        {children}
+      </select>
+    </label>
+  )
+}
+
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-muted">{children}</p>
+}

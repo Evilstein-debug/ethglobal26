@@ -15,37 +15,34 @@ pool; Base mainnet only; Base USDC; long-only Flash brackets; 0G private tier; P
 
 ## Status
 
-| Phase | Scope                                                                                                                                                                                                                     | State                                                  | Commit               |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------- |
-| 0     | Starter repurposed: anvil + Base, tokens, canonical hashing, schemas, env, stubs                                                                                                                                          | ✅ done                                                | `81ad8a9`            |
-| —     | DB switched SQLite → Postgres (Neon prod via `pg`, PGlite local/tests)                                                                                                                                                    | ✅ done                                                | `0e7aa0e`            |
-| 1     | TradeLog + Arena contracts, 36 forge tests (unit, fuzz, invariants), deploy script                                                                                                                                        | ✅ done                                                | `5d5a198`            |
-| 2     | Key box, egress allowlist, signer, policy engine; owner auth, verify route (dev verifier on anvil), agent API                                                                                                             | ✅ done                                                | `44fe63c`, `9cff6ca` |
-| 3     | Flash client + local stub; trade pipeline (commit → quote → approve → sign → submit → record), close; anvil integration tests                                                                                             | ✅ done on anvil (live Base run pending: team)         | `a473c32`, `6d60f15` |
-| 4     | 0G brain: client; allocation / trade / prediction decisions; validation, clamping, decisions log, injection fixtures                                                                                                      | ✅ done on anvil (live 0G run pending: team)           | `3dd1f65`, `aba1f56` |
-| 5     | Scheduler, resolver, Brier scoring, reward epochs, read API, owner-prediction indexer; e2e runs a full round → claim                                                                                                      | ✅ done on anvil                                       | `8d7393e`, `08f052d` |
-| 6     | World ID 4.0 backend: RP signatures, proof verification (signal = wallet, Proof of Human, Developer Portal v4 verify), nullifier normalization, routes; WORLD_FEEDBACK.md started. IDKit widget lands with the Phase 7 UI | ✅ server done (live World verification pending: team) | next                 |
-| 7     | Web UI: arena, agent profile, entry detail, leaderboards, rewards                                                                                                                                                         | ⬜                                                     | —                    |
-| 8     | verify.ts, seed-replay, README, WORLD_FEEDBACK.md, deploy config                                                                                                                                                          | ⬜                                                     | —                    |
+| Phase | Scope                                                                                                                                                                                                                                                                       | State                                          | Commit               |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------- |
+| 0     | Starter repurposed: anvil + Base, tokens, canonical hashing, schemas, env, stubs                                                                                                                                                                                            | ✅ done                                        | `81ad8a9`            |
+| —     | DB switched SQLite → Postgres (Neon prod via `pg`, PGlite local/tests)                                                                                                                                                                                                      | ✅ done                                        | `0e7aa0e`            |
+| 1     | TradeLog + Arena contracts, 36 forge tests (unit, fuzz, invariants), deploy script                                                                                                                                                                                          | ✅ done                                        | `5d5a198`            |
+| 2     | Key box, egress allowlist, signer, policy engine; owner auth, verify route (dev verifier on anvil), agent API                                                                                                                                                               | ✅ done                                        | `44fe63c`, `9cff6ca` |
+| 3     | Flash client + local stub; trade pipeline (commit → quote → approve → sign → submit → record), close; anvil integration tests                                                                                                                                               | ✅ done on anvil (live Base run pending: team) | `a473c32`, `6d60f15` |
+| 4     | 0G brain: client; allocation / trade / prediction decisions; validation, clamping, decisions log, injection fixtures                                                                                                                                                        | ✅ done on anvil (live 0G run pending: team)   | `3dd1f65`, `aba1f56` |
+| 5     | Scheduler, resolver, Brier scoring, reward epochs, read API, owner-prediction indexer; e2e runs a full round → claim                                                                                                                                                        | ✅ done on anvil                               | `8d7393e`, `08f052d` |
+| 6     | World ID 4.0 backend: RP signatures, proof verification (signal = wallet, Proof of Human, v4 verify), nullifier normalization, routes; WORLD_FEEDBACK.md started                                                                                                            | ✅ server done (live World run pending: team)  | `2ee03b7`            |
+| 7     | Web UI: shell + stub labels ✅, API client + owner auth ✅, Arena (countdown, entries, split, manual picks) ✅, Onboard (IDKit widget / dev) ✅, My agents + create ✅, Agent profile (fund, withdraw, pause, trades, decisions) ✅; Entry detail, Leaderboards, Rewards ⏳ | 🟡 in progress                                 | next                 |
+| 8     | verify.ts, seed-replay, README, WORLD_FEEDBACK.md, deploy config                                                                                                                                                                                                            | ⬜                                             | —                    |
 
 ## Resume point
 
-**Next step:** Phase 7, web UI (`apps/web`, Next.js + wagmi + RainbowKit, reuse `ui.tsx`,
-`use-tx.ts`, `tx-status.tsx`, `connect-button.tsx`):
+**Next step:** finish Phase 7 in `apps/web/src/app/`, reusing `components/links.tsx` (`TxLink`,
+`ModelBadge`), `components/ui.tsx`, `lib/api.ts` (`useApi`, `useOwnerAuth`, `useHealth`),
+`lib/use-tx.ts`:
 
-1. Shared `apiFetch` + owner auth (sign `authMessage` from `@starter/shared/auth` once per
-   session, keep the header in memory).
-2. Onboard page: `GET /api/world/config`; method `world` → `@worldcoin/idkit@4.6.0`
-   `IDKitRequestWidget` with `rp_context` from `POST /api/world/rp-signature`,
-   `preset={proofOfHuman({ signal: wallet.toLowerCase() })}`, `handleVerify` → `POST
-/api/owners/verify { proof }`; method `dev` (anvil) → a labeled "dev identity" input. States:
-   success / already registered / cancelled.
-3. Create Agent (mode, caps) + fund (USDC transfer via `useTx`), Agent profile (balances, policy,
-   pause/resume, withdraw, decisions with request IDs + TEE badge, intents with BaseScan links).
-4. Arena (current round countdown, entries, prediction split, owner manual pick via
-   `Arena.predict` from the owner wallet), Entry detail (verification checklist from
-   `/api/entries/:id`), Leaderboards, Rewards (epochs, awards, `Arena.claim`).
-5. Labels: "local stub" for stub decisions/fills, "replay" rows, "Demo, not financial advice".
+1. `entries/[id]/page.tsx`: checklist from `GET /api/entries/:id`: each intent's commit block <
+   fill (TxLinks), intent state CLOSED, PnL math (Σ received − spent), outcome matches, every
+   decision listed with request ID + ModelBadge; predictions with Brier.
+2. `leaderboard/page.tsx`: `GET /api/leaderboard` (traders by netReturnPct, predictors by
+   meanBrier; label `replay` rows).
+3. `rewards/page.tsx`: `GET /api/epochs`, `GET /api/owners/:wallet/awards`; claim button →
+   `useTx` `Arena.claim(epochId)` (arenaAbi; address from `useHealth().contracts.arena`).
+4. Gate: `pnpm lint`, `pnpm typecheck`, `cd apps/web && pnpm build`, then commit.
+   Then Phase 8 (verify.ts, seed-replay.ts, README rewrite, deploy config).
 
 ## Things the team must do (agent can't)
 
