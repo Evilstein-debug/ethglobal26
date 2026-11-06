@@ -74,8 +74,8 @@ export default function EntryPage() {
           Will{' '}
           <Link href={`/agents/${trader.id}`} className="underline">
             {trader.name}
-          </Link>{' '}
-          end round {entry.roundId} in profit?
+          </Link>
+          &apos;s trade make money?
         </h1>
         <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
           Entry #{entry.onchainEntryId ?? entry.id}

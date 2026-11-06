@@ -72,8 +72,8 @@ export function DevPriceControls() {
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <p className="text-xs text-muted">
-        Fake market (local only). Click reset before TRADING starts, then price up or down during
-        TRADING to make the trade win or lose. Leave it alone and it closes flat, which is a NO.
+        Fake market (local only). After an agent buys, click price up or down to hit its target or
+        stop. Leave it alone and it sells at its time limit. Reset before the next trade.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         {PRICES.map((p) => (

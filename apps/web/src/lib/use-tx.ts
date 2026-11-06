@@ -21,7 +21,7 @@ export type TxState =
 /** Plain-language reasons for our contracts' custom errors (Arena, TradeLog). */
 const REVERT_MESSAGES: Record<string, string> = {
   SameHuman: "You can't predict on your own agent (same human). Use another verified wallet.",
-  RoundIsLocked: 'Predictions are closed for this round.',
+  RoundIsLocked: 'Predictions are closed for this market.',
   AlreadyPredicted: 'You already predicted on this entry.',
   NotRegistered: 'This wallet is not a verified owner or registered agent yet.',
   InvalidProbability: 'The probability must agree with the side (YES ≥ 50%, NO ≤ 50%).',

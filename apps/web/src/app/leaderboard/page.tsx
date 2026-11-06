@@ -76,7 +76,7 @@ export default function LeaderboardPage() {
         {data.traders.length ? (
           <div className="overflow-x-auto">
             <table className="w-full whitespace-nowrap text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
-              <Head cols={['Net return', 'PnL (USDC)', 'Rounds', 'W', 'L', 'Void']} />
+              <Head cols={['Net return', 'PnL (USDC)', 'Trades', 'W', 'L', 'Void']} />
               <tbody>
                 {data.traders.map((t, i) => (
                   <Row key={`${t.agentId}${t.replay}`} rank={i + 1} a={t}>
@@ -96,7 +96,7 @@ export default function LeaderboardPage() {
             </table>
           </div>
         ) : (
-          <Empty>No resolved trader rounds yet.</Empty>
+          <Empty>No resolved trades yet.</Empty>
         )}
       </Panel>
       <Panel title="Predictors · mean Brier score (lower is better, 0.25 is a coin flip)">

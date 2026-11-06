@@ -182,7 +182,7 @@ export default function AgentPage() {
         <p className="text-xs text-muted">
           {activity?.stats
             .map((s) => `${s.role}: ${s.wins}W ${s.losses}L ${s.voids} void over ${s.rounds}`)
-            .join(' · ') || 'No resolved rounds yet.'}
+            .join(' · ') || 'No resolved trades yet.'}
         </p>
         {activity?.stats.some((s) => s.replay) && (
           <p className="text-xs text-bad">
@@ -199,7 +199,7 @@ export default function AgentPage() {
             <table className="w-full text-left text-xs">
               <thead className="text-muted">
                 <tr>
-                  <th className="py-1">Round</th>
+                  <th className="py-1">Market</th>
                   <th>State</th>
                   <th>Size</th>
                   <th>Entry / SL / TP</th>
@@ -253,7 +253,7 @@ export default function AgentPage() {
               <li key={d.id} className="flex flex-col gap-1 border-b border-line pb-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">
-                    R{d.roundId} {d.kind}
+                    {d.roundId ? `Market ${d.roundId}` : 'Thought'} · {d.kind}
                   </span>
                   <ModelBadge d={d} />
                   <Badge tone={d.accepted ? 'ok' : 'bad'}>

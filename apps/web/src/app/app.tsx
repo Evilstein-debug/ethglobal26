@@ -21,21 +21,23 @@ type Entry = {
   tradeBudgetUsdc: number | null
   predictions: { yes: number; no: number; avgProbYesBps: number | null }
 }
-type Round = {
-  id?: number
-  phase?: string
-  phaseEndsAt?: number
-  serverTime: number
-  entries?: Entry[]
+type Market = {
+  id: number
+  phase: 'OPENING' | 'PREDICTING' | 'TRADING' | 'RESOLVING' | 'SETTLED'
+  predictionsCloseAt: number
+  closesAt: number | null
+  trade?: {
+    asset: string
+    sizeUsdc: number
+    entryPrice: string
+    targetPrice: string
+    stopPrice: string
+    state: string
+    rationale: string
+  }
+  entries: Entry[]
 }
-
-const PHASE_HELP: Record<string, string> = {
-  REGISTRATION: 'Agents decide (on 0G) whether to trade this round and with how much.',
-  PREDICTING: 'Agents and owners call YES/NO on each trader. Free: nothing is staked.',
-  TRADING: 'Predictions are locked onchain. Traders commit each trade, then execute on Flash.',
-  RESOLVING: 'Positions are closed and PnL is computed from Flash fills.',
-  SETTLED: 'Round over. Next round starts shortly.',
-}
+type Markets = { serverTime: number; open: Market[]; recent: Market[] }
 
 function Countdown({ endsAt, serverTime }: { endsAt: number; serverTime: number }) {
   const [now, setNow] = useState(() => Date.now())
@@ -101,90 +103,148 @@ function ManualPick({ entry, arena }: { entry: Entry; arena: `0x${string}` }) {
   )
 }
 
+function MarketCard({
+  market,
+  serverTime,
+  canPredict,
+  you,
+  arena,
+}: {
+  market: Market
+  serverTime: number
+  canPredict: boolean
+  you?: string
+  arena?: `0x${string}`
+}) {
+  const e = market.entries[0]!
+  const t = market.trade
+  const total = e.predictions.yes + e.predictions.no
+  const predicting = market.phase === 'PREDICTING' && e.outcome === 'PENDING'
+  const yours = you?.toLowerCase() === e.trader.owner.toLowerCase()
+  return (
+    <Panel title={`Market #${market.id}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold">
+            Will{' '}
+            <Link
+              href={`/agents/${e.trader.id}`}
+              className="underline underline-offset-4 hover:no-underline"
+            >
+              {e.trader.name}
+            </Link>
+            &apos;s trade make money?
+          </p>
+          {t && (
+            <p className="text-xs text-muted">
+              Bought {t.sizeUsdc} USDC of {t.asset} at ${t.entryPrice} · target ${t.targetPrice} ·
+              stop ${t.stopPrice}
+            </p>
+          )}
+        </div>
+        <OutcomeBadge e={e} />
+      </div>
+      {t?.rationale && <p className="text-xs text-muted">Its reasoning: “{t.rationale}”</p>}
+      {predicting && (
+        <p className="text-sm">
+          Predictions close in{' '}
+          <Countdown endsAt={market.predictionsCloseAt} serverTime={serverTime} />
+        </p>
+      )}
+      {market.phase === 'TRADING' && (
+        <p className="text-sm text-muted">Predictions are locked. The trade is still open.</p>
+      )}
+      {market.closesAt != null && market.phase !== 'SETTLED' && e.outcome === 'PENDING' && (
+        <p className="text-xs text-muted">
+          If neither target nor stop is hit, it sells in{' '}
+          <Countdown endsAt={market.closesAt} serverTime={serverTime} />
+        </p>
+      )}
+      <div className="flex h-2 w-full bg-line" aria-label="prediction split">
+        <div
+          className="bg-ok"
+          style={{ width: total ? `${(e.predictions.yes / total) * 100}%` : '0%' }}
+        />
+        <div
+          className="bg-bad"
+          style={{ width: total ? `${(e.predictions.no / total) * 100}%` : '0%' }}
+        />
+      </div>
+      <p className="text-xs text-muted">
+        {e.predictions.yes} YES · {e.predictions.no} NO
+        {e.predictions.avgProbYesBps != null &&
+          ` · avg P(YES) ${(e.predictions.avgProbYesBps / 100).toFixed(0)}%`}
+      </p>
+      {predicting &&
+        canPredict &&
+        arena &&
+        (yours ? (
+          <p className="text-xs text-muted">
+            Your agent: you can&apos;t predict on it. Switch to another verified wallet to pick.
+          </p>
+        ) : (
+          <ManualPick entry={e} arena={arena} />
+        ))}
+      <Link href={`/entries/${e.id}`} className="text-xs underline">
+        Verify this entry →
+      </Link>
+    </Panel>
+  )
+}
+
 export function App() {
-  const { data: round, error } = useApi<Round>('/api/rounds/current', 3000)
+  const { data, error } = useApi<Markets>('/api/markets', 2000)
   const { data: health } = useHealth()
   const { address } = useAccount()
   const { data: owner } = useApi<{ verified: boolean }>(address ? `/api/owners/${address}` : null)
 
   if (error) return <Empty>Server unreachable.</Empty>
-  if (!round) return <Empty>Loading…</Empty>
-  if (!round.id) return <Empty>No round yet. The first one starts automatically.</Empty>
+  if (!data) return <Empty>Loading…</Empty>
+  const card = (m: Market) => (
+    <MarketCard
+      key={m.id}
+      market={m}
+      serverTime={data.serverTime}
+      canPredict={Boolean(owner?.verified)}
+      you={address}
+      arena={health?.contracts.arena}
+    />
+  )
 
   return (
     <div className="flex flex-col gap-6">
-      <Panel title={`Round ${round.id}`}>
-        <div className="flex flex-wrap items-baseline justify-between gap-4">
-          <p className="text-2xl font-semibold tracking-tight">{round.phase}</p>
-          {round.phase !== 'SETTLED' && round.phaseEndsAt && (
-            <p className="text-sm text-muted">
-              ends in <Countdown endsAt={round.phaseEndsAt} serverTime={round.serverTime} />
-            </p>
-          )}
-        </div>
-        <p className="text-sm text-muted">{PHASE_HELP[round.phase ?? ''] ?? ''}</p>
+      <Panel title="How it works">
+        <p className="text-sm text-muted">
+          Agents decide for themselves when to trade. Every filled trade appears here at once as a
+          public question: will it make money? Other agents and owners call YES or NO for free until
+          predictions close, then the result comes from the real fills. Watch them think on the{' '}
+          <Link href="/live" className="underline">
+            Live
+          </Link>{' '}
+          tab.
+        </p>
         <DevPriceControls />
       </Panel>
 
-      <section className="grid gap-px border border-line bg-line md:grid-cols-2">
-        {round.entries?.length ? (
-          round.entries.map((e) => {
-            const total = e.predictions.yes + e.predictions.no
-            return (
-              <Panel key={e.id} title={`Entry #${e.onchainEntryId ?? e.id}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <Link
-                      href={`/agents/${e.trader.id}`}
-                      className="font-semibold underline-offset-4 hover:underline"
-                    >
-                      {e.trader.name}
-                    </Link>
-                    <p className="text-xs text-muted">
-                      Will {e.trader.name} end this round in profit?
-                    </p>
-                  </div>
-                  <OutcomeBadge e={e} />
-                </div>
-                <div className="flex h-2 w-full bg-line" aria-label="prediction split">
-                  <div
-                    className="bg-ok"
-                    style={{ width: total ? `${(e.predictions.yes / total) * 100}%` : '0%' }}
-                  />
-                  <div
-                    className="bg-bad"
-                    style={{ width: total ? `${(e.predictions.no / total) * 100}%` : '0%' }}
-                  />
-                </div>
-                <p className="text-xs text-muted">
-                  {e.predictions.yes} YES · {e.predictions.no} NO
-                  {e.predictions.avgProbYesBps != null &&
-                    ` · avg P(YES) ${(e.predictions.avgProbYesBps / 100).toFixed(0)}%`}
-                  {e.tradeBudgetUsdc != null && ` · budget ${e.tradeBudgetUsdc} USDC`}
-                </p>
-                {round.phase === 'PREDICTING' &&
-                  owner?.verified &&
-                  health &&
-                  (address?.toLowerCase() === e.trader.owner.toLowerCase() ? (
-                    <p className="text-xs text-muted">
-                      Your agent: you can&apos;t predict on it. Switch to another verified wallet to
-                      pick.
-                    </p>
-                  ) : (
-                    <ManualPick entry={e} arena={health.contracts.arena} />
-                  ))}
-                <Link href={`/entries/${e.id}`} className="text-xs underline">
-                  Verify this entry →
-                </Link>
-              </Panel>
-            )
-          })
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xs text-muted uppercase tracking-widest">Open markets</h2>
+        {data.open.length ? (
+          <div className="grid gap-px border border-line bg-line md:grid-cols-2">
+            {data.open.map(card)}
+          </div>
         ) : (
-          <Panel title="Entries" className="md:col-span-2">
-            <Empty>No trader entered this round yet.</Empty>
-          </Panel>
+          <Empty>No open markets. One appears the moment an agent trades.</Empty>
         )}
       </section>
+
+      {data.recent.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xs text-muted uppercase tracking-widest">Finished</h2>
+          <div className="grid gap-px border border-line bg-line md:grid-cols-2">
+            {data.recent.map(card)}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

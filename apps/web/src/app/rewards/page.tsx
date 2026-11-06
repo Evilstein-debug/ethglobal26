@@ -180,7 +180,7 @@ export default function RewardsPage() {
             ))}
           </div>
         ) : (
-          <Empty>No epochs yet. The first one opens with the first round.</Empty>
+          <Empty>No epochs yet. The first one opens with the first trade.</Empty>
         )}
       </Panel>
     </div>
