@@ -19,7 +19,7 @@ import { canonicalHash, canonicalJson, idHash } from '@starter/shared/canonical'
 import { tradeLogAbi } from '@starter/shared/generated'
 import { tradeIntentSchema, type TradeIntent } from '@starter/shared/schemas'
 import { USDC_DECIMALS } from '@starter/shared/tokens'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray, lte } from 'drizzle-orm'
 import { encodeFunctionData, getAddress, isHex, parseUnits, type Hash, type Hex } from 'viem'
 import type { AppContext, FlashSetup } from '../context'
 import { schema } from '../db'
@@ -192,6 +192,8 @@ export async function executeTrade(
     stopPrice: intent.stopPrice,
     targetPrice: intent.targetPrice,
     decisionId: opts.decisionId ?? null,
+    createdAt: ctx.now(),
+    updatedAt: ctx.now(),
   })
   const setIntent = (fields: Partial<typeof schema.intents.$inferInsert>) =>
     ctx.db
@@ -363,6 +365,83 @@ export async function executeTrade(
       recordTx: recordTx ?? null,
     })
     return { status: 'failed', intentId, reason: failure.reason, detail: failure.detail, commitTx }
+  }
+}
+
+const STUCK_AFTER_MS = 5 * 60_000
+
+/**
+ * After a crash an intent can be left mid-pipeline. Commits must still end onchain as executed or
+ * failed, and a stuck intent would block the agent's next trade, so finish the job: a fill that
+ * happened is recorded, everything else is recorded as a failure and its budget released.
+ */
+export async function recoverStuckIntents(ctx: AppContext) {
+  const stuck = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(
+      and(
+        inArray(schema.intents.state, ['DRAFT', 'COMMITTED', 'EXECUTING']),
+        lte(schema.intents.updatedAt, ctx.now() - STUCK_AFTER_MS),
+      ),
+    )
+  for (const intent of stuck) {
+    const [agent] = await ctx.db
+      .select()
+      .from(schema.agents)
+      .where(eq(schema.agents.id, intent.agentId))
+    if (!agent) continue
+    const [reservation] = await ctx.db
+      .select()
+      .from(schema.spendLedger)
+      .where(
+        and(eq(schema.spendLedger.ref, intent.intentId), eq(schema.spendLedger.status, 'reserved')),
+      )
+    const signer = agentSigner(ctx, agent)
+    const send = (fn: 'recordExecution' | 'recordFailure', args: readonly unknown[]) =>
+      sendAndWait(
+        ctx,
+        signer,
+        ctx.contracts.tradeLog,
+        encodeFunctionData({ abi: tradeLogAbi, functionName: fn, args: args as never }),
+        'internal_error',
+      )
+    const set = (fields: Partial<typeof schema.intents.$inferInsert>) =>
+      ctx.db
+        .update(schema.intents)
+        .set({ ...fields, updatedAt: ctx.now() })
+        .where(eq(schema.intents.intentId, intent.intentId))
+    try {
+      if (intent.flashOrderId && ctx.flash) {
+        const funder = getAddress(agent.address)
+        const { order, fills } = await ctx.flash.api.getOrder(intent.flashOrderId, funder)
+        if (!TERMINAL_STATUSES.includes(order.status)) continue
+        const fillTx = fills.find((f) => isHex(f.transactionId))?.transactionId
+        if (order.status === 'ORDER_STATUS_FILLED' && fillTx) {
+          const spent = Math.min(
+            usdcUnits(Number(order.filled!.contraAmount).toFixed(6)),
+            intent.sizeQuote,
+          )
+          const recordTx = await send('recordExecution', [intent.intentHash, fillTx as Hex])
+          if (reservation) await settleReservation(ctx.db, reservation.id, spent)
+          await set({
+            state: 'EXECUTED',
+            recordTx,
+            flashBracketOrderId: order.attachedBracket?.bracketOrderId ?? null,
+            entryFillTx: fillTx,
+            usdcSpent: spent,
+          })
+          continue
+        }
+      }
+      const recordTx = intent.commitTx
+        ? await send('recordFailure', [intent.intentHash, FAILURE_CODES.internal_error])
+        : null
+      if (reservation) await releaseReservation(ctx.db, reservation.id)
+      await set({ state: 'FAILED', failReason: 'recovered_after_restart', recordTx })
+    } catch (err) {
+      console.error(`[trade] recovering ${intent.intentId} failed; will retry:`, err)
+    }
   }
 }
 

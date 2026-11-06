@@ -7,8 +7,8 @@ import { encodeFunctionData, erc20Abi, type Address, type Hex } from 'viem'
 import { schema } from '../db'
 import { createAgent } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
-import { closePosition, realizedPnl } from './close'
-import { executeTrade, newIntentId } from './trade'
+import { closePosition, realizedPnl, syncExit } from './close'
+import { executeTrade, newIntentId, recoverStuckIntents } from './trade'
 
 const policy = { perTradeCap: '5', dailyCap: '20' }
 
@@ -199,6 +199,63 @@ describe('trade pipeline on anvil', { skip: skipReason }, () => {
     assert.ok(row!.flashCloseOrderId)
     // Up only 0.33% with 0.3% fees each way → realized loss: fees matter (CLAUDE.md §4 row 9).
     assert.ok(realizedPnl(row!)! < 0)
+  })
+
+  test('syncExit: sees a fired bracket, and leaves an open position alone', async () => {
+    const { ctx, agent, stub, db } = await setup()
+    const intent = intentFor(agent)
+    await executeTrade(ctx, intent)
+    assert.equal(await syncExit(ctx, intent.intentId), null)
+    stub.setPrice(3100)
+    const exit = await syncExit(ctx, intent.intentId)
+    assert.ok(exit?.status === 'closed' && exit.via === 'bracket')
+    const [row] = await db.select().from(schema.intents)
+    assert.equal(row!.state, 'CLOSED')
+  })
+
+  // A process that dies mid-trade: the Flash call never returns, and nothing finishes the intent.
+  const crashAt = async (
+    w: Awaited<ReturnType<typeof setup>>,
+    method: 'getOrder' | 'submitOrder',
+  ) => {
+    const real = w.stub[method]
+    let reached = false
+    w.stub[method] = (() => {
+      reached = true
+      return new Promise(() => undefined)
+    }) as never
+    void executeTrade(w.ctx, intentFor(w.agent))
+    for (let i = 0; !reached; i++) {
+      assert.ok(i < 500, 'trade reached the crash point')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    w.stub[method] = real as never
+    const [row] = await w.db.select().from(schema.intents)
+    return { ...w.ctx, now: () => row!.updatedAt + 6 * 60_000 }
+  }
+
+  test('restart recovery: a filled order carries on as an open position', async () => {
+    const w = await setup()
+    const restarted = await crashAt(w, 'getOrder')
+    await recoverStuckIntents(w.ctx) // too recent to touch: it may still be running
+    assert.equal((await w.db.select().from(schema.intents))[0]!.state, 'EXECUTING')
+    await recoverStuckIntents(restarted)
+    const [row] = await w.db.select().from(schema.intents)
+    assert.equal(row!.state, 'EXECUTED')
+    assert.equal(await w.onchain(row!.intentHash as Hex), 'Executed')
+    const [ledger] = await w.db.select().from(schema.spendLedger)
+    assert.equal(ledger!.status, 'settled')
+  })
+
+  test('restart recovery: an order that never went out fails onchain and refunds', async () => {
+    const w = await setup()
+    const restarted = await crashAt(w, 'submitOrder')
+    await recoverStuckIntents(restarted)
+    const [row] = await w.db.select().from(schema.intents)
+    assert.deepEqual([row!.state, row!.failReason], ['FAILED', 'recovered_after_restart'])
+    assert.equal(await w.onchain(row!.intentHash as Hex), 'Failed')
+    const [ledger] = await w.db.select().from(schema.spendLedger)
+    assert.equal(ledger!.status, 'released')
   })
 
   test('close is a no-op for intents that never executed', async () => {

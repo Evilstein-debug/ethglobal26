@@ -28,6 +28,43 @@ export type CloseResult =
 const toUsdc = (decimal: string) =>
   Number(parseUnits(Number(decimal).toFixed(USDC_DECIMALS), USDC_DECIMALS))
 
+async function finish(
+  ctx: AppContext,
+  intentId: string,
+  via: 'bracket' | 'market',
+  order: GetOrderResponse,
+  closeOrderId?: string,
+): Promise<CloseResult> {
+  const exitFillTx = order.fills.find((f) => isHex(f.transactionId))?.transactionId ?? ''
+  const usdcReceived = toUsdc(order.order.filled?.contraAmount ?? '0')
+  await ctx.db
+    .update(schema.intents)
+    .set({
+      state: 'CLOSED',
+      usdcReceived,
+      exitFillTx,
+      flashCloseOrderId: closeOrderId ?? null,
+      updatedAt: ctx.now(),
+    })
+    .where(eq(schema.intents.intentId, intentId))
+  return { status: 'closed', intentId, via, usdcReceived, exitFillTx }
+}
+
+/** Read-only check: did a bracket leg fire? Returns the close, or null if still open. */
+export async function syncExit(ctx: AppContext, intentId: string): Promise<CloseResult | null> {
+  const flash = ctx.flash
+  const [intent] = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(eq(schema.intents.intentId, intentId))
+  if (!flash || intent?.state !== 'EXECUTED' || !intent.flashBracketOrderId) return null
+  const agent = await getAgent(ctx, intent.agentId)
+  const bracket = await flash.api.getOrder(intent.flashBracketOrderId, getAddress(agent.address))
+  return bracket.order.status === 'ORDER_STATUS_FILLED'
+    ? finish(ctx, intentId, 'bracket', bracket)
+    : null
+}
+
 export async function closePosition(ctx: AppContext, intentId: string): Promise<CloseResult> {
   const flash = ctx.flash
   const [intent] = await ctx.db
@@ -43,25 +80,8 @@ export async function closePosition(ctx: AppContext, intentId: string): Promise<
   const agent = await getAgent(ctx, intent.agentId)
   const funder = getAddress(agent.address)
   const signer = agentSigner(ctx, agent)
-  const done = async (
-    via: 'bracket' | 'market',
-    order: GetOrderResponse,
-    closeOrderId?: string,
-  ) => {
-    const exitFillTx = order.fills.find((f) => isHex(f.transactionId))?.transactionId ?? ''
-    const usdcReceived = toUsdc(order.order.filled?.contraAmount ?? '0')
-    await ctx.db
-      .update(schema.intents)
-      .set({
-        state: 'CLOSED',
-        usdcReceived,
-        exitFillTx,
-        flashCloseOrderId: closeOrderId ?? null,
-        updatedAt: ctx.now(),
-      })
-      .where(eq(schema.intents.intentId, intentId))
-    return { status: 'closed' as const, intentId, via, usdcReceived, exitFillTx }
-  }
+  const done = (via: 'bracket' | 'market', order: GetOrderResponse, closeOrderId?: string) =>
+    finish(ctx, intentId, via, order, closeOrderId)
 
   try {
     const entry = await flash.api.getOrder(intent.flashOrderId, funder)
