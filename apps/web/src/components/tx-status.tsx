@@ -1,4 +1,7 @@
-import { explorerTxUrl } from '@starter/shared/chains'
+'use client'
+
+import { explorerTxUrl, LOCAL_CHAIN_ID } from '@starter/shared/chains'
+import { useEffect, useState } from 'react'
 import { targetChain } from '@/lib/env'
 import type { TxState } from '@/lib/use-tx'
 import { short } from './ui'
@@ -12,7 +15,20 @@ const LABEL = {
   failed: 'Failed',
 }
 
+/** Anvil mines at once, so a long wait means the wallet is counting from an older local chain. */
+function useStuckOnLocalChain(state: TxState) {
+  const [stuck, setStuck] = useState(false)
+  const pending = state.status === 'pending' && targetChain.id === LOCAL_CHAIN_ID
+  useEffect(() => {
+    if (!pending) return setStuck(false)
+    const timer = setTimeout(() => setStuck(true), 10_000)
+    return () => clearTimeout(timer)
+  }, [pending])
+  return stuck
+}
+
 export function TxStatus({ state }: { state: TxState }) {
+  const stuck = useStuckOnLocalChain(state)
   if (state.status === 'idle') return null
   const hash = 'hash' in state ? state.hash : undefined
   const url = hash && explorerTxUrl(targetChain, hash)
@@ -31,6 +47,12 @@ export function TxStatus({ state }: { state: TxState }) {
         ) : (
           <span className="font-mono">{short(hash)}</span>
         ))}
+      {stuck && (
+        <span>
+          Stuck: your wallet is still counting transactions from an older local chain. In MetaMask,
+          go to Settings → Advanced → Clear activity tab data, then send again.
+        </span>
+      )}
     </p>
   )
 }
