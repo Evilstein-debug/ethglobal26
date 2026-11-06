@@ -20,7 +20,8 @@
     "drizzle-orm": "0.45.4",
     "express": "5.3.0",
     "pg": "8.23.1",
-    "viem": "2.57.14"
+    "viem": "2.57.14",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/cors": "2.8.19",

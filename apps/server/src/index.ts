@@ -1,41 +1,49 @@
-import cors from 'cors'
-import express, { type ErrorRequestHandler } from 'express'
-import { chain, publicClient, rpcUrl } from './chain'
-import { sql } from 'drizzle-orm'
+import type { PublicClient } from 'viem'
+import { createApp } from './app'
+import { devHumanVerifier, type HumanVerifier } from './auth/human'
+import { chain, pollingInterval, publicClient, rpcUrl } from './chain/client'
+import { contractsOn } from './chain/contracts'
+import { createArenaOps } from './chain/operator'
+import type { AppContext } from './context'
 import { openDb } from './db'
 import { env } from './env'
+import { KeyBox } from './wallets/keybox'
 
-// Anything that must not run in the browser lives here: agent keys, policy engine, 0G and Flash
-// calls, the round scheduler and resolver. Routes are added phase by phase (see CLAUDE.md §8).
+// Server-only work: agent keys, policy engine, 0G and Flash calls, scheduler, resolver.
 const { db, kind: dbKind } = await openDb(env.databaseUrl)
+const contracts = contractsOn(chain.id)
+const client = publicClient as unknown as PublicClient
 
-const app = express()
-app.disable('x-powered-by')
-app.use(cors({ origin: env.corsOrigins }))
-app.use(express.json())
-
-app.get('/health', async (_req, res) => {
-  const blockNumber = await publicClient.getBlockNumber()
-  const dbOk = await db.execute(sql`select 1`).then(
-    () => true,
-    () => false,
-  )
-  res.json({
-    ok: true,
-    chainId: chain.id,
-    blockNumber: blockNumber.toString(),
-    db: dbOk,
-  })
-})
-
-const onError: ErrorRequestHandler = (err, req, res, next) => {
-  if (res.headersSent) return next(err)
-  console.error(`[server] ${req.method} ${req.path} failed:`, err)
-  res.status(500).json({ error: 'Internal error' })
+function humanVerifier(): HumanVerifier {
+  if (env.humanVerifier === 'dev') {
+    console.warn('[server] HUMAN_VERIFIER=dev: owners are NOT World-verified (local anvil only)')
+    return devHumanVerifier
+  }
+  throw new Error('World ID verification arrives in Phase 6; set HUMAN_VERIFIER=dev on anvil')
 }
-app.use(onError)
 
-app.listen(env.port, (error) => {
+const ctx: AppContext = {
+  db,
+  chain,
+  rpcUrl,
+  pollingInterval,
+  publicClient: client,
+  contracts,
+  arena: createArenaOps({
+    arena: contracts.arena,
+    operatorKey: env.operatorKey,
+    chain,
+    rpcUrl,
+    publicClient: client,
+    pollingInterval,
+  }),
+  keyBox: new KeyBox(env.masterKey),
+  humanVerifier: humanVerifier(),
+  flashSettlement: env.flash.settlement,
+  now: Date.now,
+}
+
+createApp(ctx, env.corsOrigins).listen(env.port, (error) => {
   if (error) throw error
   console.log(
     `[server] http://localhost:${env.port} · chain ${chain.id} (${chain.name}) · rpc ${rpcUrl} · db ${dbKind}`,

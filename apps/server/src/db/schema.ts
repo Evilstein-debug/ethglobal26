@@ -34,6 +34,12 @@ export const owners = pgTable('owners', {
   /** keccak256(nullifier_hash); the id registered in Arena. */
   humanId: text('human_id').notNull().unique(),
   verifiedAt: num('verified_at').notNull(),
+  /** 'world' (IDKit proof) or 'dev' (local anvil only, labeled in the API). */
+  verifyMethod: text('verify_method', { enum: ['world', 'dev'] })
+    .notNull()
+    .default('world'),
+  /** Arena.registerOwner tx. */
+  registerTx: text('register_tx'),
   createdAt: createdAt(),
 })
 

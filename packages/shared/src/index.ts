@@ -1,3 +1,4 @@
+export * from './auth'
 export * from './canonical'
 export * from './chains'
 export * from './generated'

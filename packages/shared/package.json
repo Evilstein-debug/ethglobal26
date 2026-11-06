@@ -10,7 +10,8 @@
     "./chains": "./src/chains.ts",
     "./generated": "./src/generated.ts",
     "./schemas": "./src/schemas.ts",
-    "./tokens": "./src/tokens.ts"
+    "./tokens": "./src/tokens.ts",
+    "./auth": "./src/auth.ts"
   },
   "scripts": {
     "codegen": "wagmi generate",

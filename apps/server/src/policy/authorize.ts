@@ -54,6 +54,8 @@ export async function authorizeTrade(
   /** Fresh on-chain USDC balance of the agent wallet (base units). */
   usdcBalance: bigint,
   now = Date.now(),
+  /** Check only: run every rule but reserve nothing (the owner's "would this trade pass?"). */
+  opts: { dryRun?: boolean } = {},
 ): Promise<TradeAuth> {
   const deny = (reason: TradeDenyReason): TradeAuth => ({ ok: false, reason })
   if (!Number.isSafeInteger(req.amount) || req.amount <= 0) return deny('invalid_amount')
@@ -106,6 +108,7 @@ export async function authorizeTrade(
     // Reserved-but-unspent budget is still in the wallet; it must not be promised twice.
     if (BigInt(openReserved + req.amount) > usdcBalance) return deny('insufficient_funds')
 
+    if (opts.dryRun) return { ok: true, reservationId: 'dry-run' }
     const reservationId = randomUUID()
     await tx.insert(schema.spendLedger).values({
       id: reservationId,
