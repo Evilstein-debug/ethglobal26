@@ -7,7 +7,7 @@
  *   3. run apps/server and apps/web against chain 31337
  * `LOCAL_STUBS=1 pnpm dev` runs with zero external keys, on labeled stubs and a throwaway chain.
  * `pnpm dev:reset` starts the local world over.
- * For a testnet, use `pnpm dev:testnet` with each app's .env pointing at it.
+ * For Base, use `pnpm dev:mainnet`, which layers apps/server/.env.mainnet over the app env.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'

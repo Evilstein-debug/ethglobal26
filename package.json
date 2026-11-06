@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "dev:reset": "tsx --env-file-if-exists=apps/server/.env scripts/dev-reset.ts",
-    "dev:testnet": "pnpm --parallel --filter @starter/server --filter @starter/web dev",
+    "dev:mainnet": "sh -c 'set -ea; . ./apps/server/.env.mainnet; pnpm --parallel --filter @starter/server --filter @starter/web dev'",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present --no-bail lint && eslint scripts",
     "lint:fix": "pnpm -r --if-present --no-bail lint:fix && eslint scripts --fix",

@@ -147,7 +147,7 @@ point it at a production database. Without keys, `LOCAL_STUBS=1 pnpm dev` runs o
 | ------------------------------ | -------------------------------------------------------------- |
 | `pnpm dev`                     | Saved local chain, real services, server and web               |
 | `pnpm dev:reset`               | Clear the local chain and every table in `DATABASE_URL`        |
-| `pnpm dev:testnet`             | Server and web only, using each app's `.env`                   |
+| `pnpm dev:mainnet`             | REAL MONEY on Base: `.env` plus `apps/server/.env.mainnet`     |
 | `pnpm test`                    | Foundry and TypeScript tests (anvil integration needs Foundry) |
 | `pnpm e2e:happy`               | An agent's trade through its market to a claim and verify      |
 | `pnpm verify <entryId>`        | Re-derive one entry from public data                           |
