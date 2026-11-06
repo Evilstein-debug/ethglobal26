@@ -56,6 +56,7 @@ jobs:
       - run: pnpm --filter @starter/shared test
       - run: pnpm --filter @starter/server test
       - run: pnpm --filter @starter/flash test
+      - run: pnpm --filter @starter/zerog test
 
   lint:
     name: lint (informational)
