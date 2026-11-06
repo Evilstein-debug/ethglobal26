@@ -197,6 +197,17 @@ export async function startAnvilWorld() {
     }
   }
 
+  /** The local stub moves no tokens, so a test that needs bought WETH in a wallet mints it. */
+  async function mintWeth(to: Address, amount: string) {
+    const hash = await funder.writeContract({
+      address: weth,
+      abi: mockUsdcAbi, // same mint(address,uint256)
+      functionName: 'mint',
+      args: [to, parseEther(amount)],
+    })
+    await publicClient.waitForTransactionReceipt({ hash })
+  }
+
   /** A wallet client for an owner account (e.g. to claim rewards). */
   const walletFor = (account: ReturnType<typeof privateKeyToAccount>) =>
     createWalletClient({ account, chain: anvil, transport: http(rpcUrl), pollingInterval: 50 })
@@ -211,6 +222,7 @@ export async function startAnvilWorld() {
     fund,
     fundPool,
     walletFor,
+    mintWeth,
     contracts: ctx.contracts,
   }
 }

@@ -5,7 +5,7 @@ import { tradeLogAbi } from '@starter/shared/generated'
 import { eq } from 'drizzle-orm'
 import { encodeFunctionData, erc20Abi, type Address, type Hex } from 'viem'
 import { schema } from '../db'
-import { createAgent } from '../services/agents'
+import { createAgent, getAgent, withdraw } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
 import { closePosition, realizedPnl, syncExit } from './close'
 import { executeTrade, newIntentId, recoverStuckIntents } from './trade'
@@ -256,6 +256,15 @@ describe('trade pipeline on anvil', { skip: skipReason }, () => {
     assert.equal(await w.onchain(row!.intentHash as Hex), 'Failed')
     const [ledger] = await w.db.select().from(schema.spendLedger)
     assert.equal(ledger!.status, 'released')
+  })
+
+  test('WETH cannot be withdrawn while its bracket is live; USDC still can', async () => {
+    const { ctx, agent, agentId, mintWeth } = await setup()
+    await executeTrade(ctx, intentFor(agent))
+    await mintWeth(agent, '0.01')
+    const row = await getAgent(ctx, agentId)
+    await assert.rejects(withdraw(ctx, row, { asset: 'WETH', amount: '0.001' }), /position_open/)
+    await withdraw(ctx, row, { asset: 'USDC', amount: '1' })
   })
 
   test('close is a no-op for intents that never executed', async () => {
