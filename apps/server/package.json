@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.15",
+    "@starter/flash": "workspace:*",
     "@starter/shared": "workspace:*",
     "cors": "2.8.6",
     "drizzle-orm": "0.45.4",

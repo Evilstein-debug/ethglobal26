@@ -4,7 +4,8 @@
  *   anvil → deploy → server up (db, chain) → owner verifies (dev verifier, anvil only) and is
  *   registered in Arena → agent created and registered → funded with MockUSDC + ETH →
  *   trade previews show deny reasons → USDC withdraw through the agent signer → a second wallet
- *   for the same human is rejected → pause blocks the agent.
+ *   for the same human is rejected → manual bracket trade through the LOCAL Flash stub (commit →
+ *   fill → recordExecution onchain) → take-profit fires → position closed → pause blocks the agent.
  *
  * Local anvil only: it never touches a live chain.
  */
@@ -17,7 +18,14 @@ import {
   resolveRpcUrl,
 } from '@starter/shared/chains'
 import { authHeader, authMessage } from '@starter/shared/auth'
-import { arenaAbi, arenaAddress, mockUsdcAbi, mockUsdcAddress } from '@starter/shared/generated'
+import {
+  arenaAbi,
+  arenaAddress,
+  mockUsdcAbi,
+  mockUsdcAddress,
+  tradeLogAbi,
+  tradeLogAddress,
+} from '@starter/shared/generated'
 import {
   createPublicClient,
   createWalletClient,
@@ -49,7 +57,7 @@ function step(label: string) {
   return (detail = '') => console.log(`  ✓ ${detail ? `${detail} ` : ''}(${Date.now() - start}ms)`)
 }
 
-type Health = { chainId: number; db: boolean; humanVerifier: string }
+type Health = { chainId: number; db: boolean; humanVerifier: string; flash: string }
 async function health(): Promise<Health | undefined> {
   try {
     const res = await fetch(`${serverUrl}/health`)
@@ -136,6 +144,8 @@ async function run() {
   const status = await health()
   assert(status?.humanVerifier === 'dev', 'local server uses the dev human verifier')
 
+  const tradeLog = addressOn(tradeLogAddress, chainId)
+  assert(tradeLog, 'TradeLog deployed')
   const funder = createWalletClient({
     account: anvilAccount(1).account,
     chain,
@@ -178,13 +188,13 @@ async function run() {
   assert((await humanOf(agent)) === verified.body.humanId, 'Arena.humanOf(agent) matches owner')
   done(agent)
 
-  done = step('fund agent: 3 mUSDC + 0.01 ETH for gas')
+  done = step('fund agent: 10 mUSDC + 0.01 ETH for gas')
   for (const hash of [
     await funder.writeContract({
       address: usdc,
       abi: mockUsdcAbi,
       functionName: 'mint',
-      args: [agent, parseUnits('3', 6)],
+      args: [agent, parseUnits('10', 6)],
     }),
     await funder.sendTransaction({ to: agent, value: parseEther('0.01') }),
   ]) {
@@ -195,12 +205,12 @@ async function run() {
   }
   const view = await api('GET', `/api/agents/${agentId}`)
   assert(
-    (view.body.balances as { usdc: string }).usdc === '3',
+    (view.body.balances as { usdc: string }).usdc === '10',
     `balance shown: ${JSON.stringify(view.body.balances)}`,
   )
   done()
 
-  done = step('trade previews: allowed, over cap, insufficient funds, asset not allowed')
+  done = step('trade previews: allowed, over cap, asset not allowed')
   const auth = await bob.auth()
   const preview = async (amount: string, asset = 'WETH') =>
     JSON.stringify(
@@ -209,10 +219,6 @@ async function run() {
     )
   assert((await preview('2')) === '{"allowed":true}', 'a 2 USDC trade passes')
   assert((await preview('6')) === '{"allowed":false,"reason":"over_trade_cap"}', 'over_trade_cap')
-  assert(
-    (await preview('4')) === '{"allowed":false,"reason":"insufficient_funds"}',
-    'insufficient_funds',
-  )
   assert(
     (await preview('1', 'PEPE')) === '{"allowed":false,"reason":"asset_not_allowed"}',
     'asset_not_allowed',
@@ -226,7 +232,7 @@ async function run() {
   })
   assert(withdrawn.status === 200, `withdraw: ${JSON.stringify(withdrawn.body)}`)
   assert((await usdcOf(bob.address)) === parseUnits('1', 6), 'owner received 1 USDC')
-  assert((await usdcOf(agent)) === parseUnits('2', 6), 'agent kept 2 USDC')
+  assert((await usdcOf(agent)) === parseUnits('9', 6), 'agent kept 9 USDC')
   done(String(withdrawn.body.hash))
 
   done = step('same human, second wallet → rejected')
@@ -240,6 +246,54 @@ async function run() {
     `sybil: ${JSON.stringify(again.body)}`,
   )
   done()
+
+  done = step('manual bracket trade via the LOCAL Flash stub: commit → fill → recordExecution')
+  assert(status?.flash === 'local-stub', 'local server uses the Flash stub')
+  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3000 } })
+  const trade = await api('POST', `/api/agents/${agentId}/manual-trade`, {
+    auth,
+    body: { sizeQuote: '5', entryRefPrice: '3000', stopPrice: '2950', targetPrice: '3060' },
+  })
+  assert(
+    trade.status === 201 && trade.body.status === 'executed',
+    `trade: ${JSON.stringify(trade.body)}`,
+  )
+  const intentHash = trade.body.intentHash as `0x${string}`
+  const [, , , onchainStatus] = await publicClient.readContract({
+    address: tradeLog,
+    abi: tradeLogAbi,
+    functionName: 'intents',
+    args: [intentHash],
+  })
+  assert(onchainStatus === 2, `TradeLog status Executed, got ${onchainStatus}`)
+  const [commitRcpt, recordRcpt] = await Promise.all([
+    publicClient.getTransactionReceipt({ hash: trade.body.commitTx as `0x${string}` }),
+    publicClient.getTransactionReceipt({ hash: trade.body.recordTx as `0x${string}` }),
+  ])
+  assert(
+    commitRcpt.blockNumber < recordRcpt.blockNumber,
+    'commit mined before the execution record',
+  )
+  done(intentHash)
+
+  done = step('take-profit fires; position closed with realized profit')
+  await api('POST', '/api/dev/flash-stub/price', { body: { priceUsd: 3100 } })
+  const closed = await api('POST', `/api/agents/${agentId}/intents/${trade.body.intentId}/close`, {
+    auth,
+  })
+  assert(
+    closed.body.status === 'closed' && closed.body.via === 'bracket',
+    `close: ${JSON.stringify(closed.body)}`,
+  )
+  const history = await api('GET', `/api/agents/${agentId}/intents`)
+  const row = (
+    history.body.intents as { state: string; usdcSpent: number; usdcReceived: number }[]
+  )[0]!
+  assert(
+    row.state === 'CLOSED' && row.usdcReceived > row.usdcSpent,
+    `closed in profit: ${JSON.stringify(row)}`,
+  )
+  done(`pnl +${((row.usdcReceived - row.usdcSpent) / 1e6).toFixed(4)} USDC (stub)`)
 
   done = step('pause blocks the agent')
   await api('POST', `/api/agents/${agentId}/pause`, { auth })

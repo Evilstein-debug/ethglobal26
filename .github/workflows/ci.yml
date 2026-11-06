@@ -31,6 +31,8 @@ jobs:
         run: forge test -vvv
         env:
           FOUNDRY_PROFILE: ci
+      - name: Server tests incl. anvil integration (trade pipeline)
+        run: pnpm --filter @starter/server test
       - name: Generated ABIs are up to date
         run: |
           pnpm codegen

@@ -22,11 +22,13 @@ function secret(name: string, localDefault: string): string {
   throw new Error(`${name} is required on chain ${chainId} (see apps/server/.env.example)`)
 }
 
-function optionalAddress(name: string): Address | undefined {
-  const value = process.env[name]
-  if (!value) return undefined
-  if (!isAddress(value)) throw new Error(`${name} is not an address: ${value}`)
-  return value
+function addressList(name: string): Address[] {
+  const values = (process.env[name] || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  for (const v of values) if (!isAddress(v)) throw new Error(`${name}: not an address: ${v}`)
+  return values as Address[]
 }
 
 export const env = {
@@ -47,8 +49,20 @@ export const env = {
     apiKey: process.env.FLASH_API_KEY || undefined,
     baseUrl: process.env.FLASH_API_BASE_URL || 'https://flash.definitive.fi/v1',
     integratorFeeBps: process.env.FLASH_INTEGRATOR_FEE_BPS || '0',
-    settlement: optionalAddress('FLASH_SETTLEMENT_ADDRESS'),
+    /** From a real quote's evm.approveTx spender (scripts/flash-inspect.ts). */
+    approvalSpenders: addressList('FLASH_APPROVAL_SPENDERS'),
+    /** From a real quote's orderTypedData domain.verifyingContract. */
+    typedDataContracts: addressList('FLASH_TYPED_DATA_CONTRACTS'),
+    /** Optional ERC-8021 builder code (base.dev) attached to order submits. */
+    attributionCode: process.env.FLASH_ATTRIBUTION_CODE || undefined,
   },
+  /**
+   * Hand-written trades (no 0G decision) for smoke-testing the Flash pipeline. Default: only on
+   * local anvil. Set to "true" on Base for the one-off first-trade check, then turn it off.
+   */
+  allowManualTrades: process.env.ALLOW_MANUAL_TRADES
+    ? process.env.ALLOW_MANUAL_TRADES === 'true'
+    : local,
   /**
    * How owners prove they're human. 'world' verifies IDKit proofs with World (Phase 6).
    * 'dev' accepts a made-up identity and is refused anywhere but local anvil.

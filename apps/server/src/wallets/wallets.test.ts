@@ -5,7 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { arenaAbi, tradeLogAbi } from '@starter/shared/generated'
 import { createAgentKey } from './agent-keys'
-import { checkTx, checkTypedData, type EgressConfig } from './egress'
+import { checkMessage, checkTx, checkTypedData, type EgressConfig } from './egress'
 import { KeyBox } from './keybox'
 import { AgentSigner, EgressDenied } from './signer'
 
@@ -17,7 +17,8 @@ const cfg: EgressConfig = {
   tradeLog: a(2),
   arena: a(3),
   tokens: [a(4), a(5)],
-  flashSettlement: a(6),
+  flashSpenders: [a(6)],
+  flashTypedDataContracts: [a(7)],
 }
 const H = `0x${'11'.repeat(32)}` as const
 
@@ -61,7 +62,7 @@ test('tokens: approve only to Flash settlement, transfer only to owner', () => {
   const approveFlash = encodeFunctionData({
     abi: erc20Abi,
     functionName: 'approve',
-    args: [cfg.flashSettlement!, 10n],
+    args: [a(6), 10n],
   })
   const approveOther = encodeFunctionData({
     abi: erc20Abi,
@@ -97,13 +98,10 @@ test('tokens: approve only to Flash settlement, transfer only to owner', () => {
     ok: false,
     reason: 'token_function_not_allowed',
   })
-  assert.deepEqual(
-    checkTx({ ...cfg, flashSettlement: undefined }, { to: a(4), data: approveFlash }),
-    {
-      ok: false,
-      reason: 'flash_settlement_unset',
-    },
-  )
+  assert.deepEqual(checkTx({ ...cfg, flashSpenders: [] }, { to: a(4), data: approveFlash }), {
+    ok: false,
+    reason: 'flash_not_configured',
+  })
 })
 
 test('ETH only to the owner, without calldata; everything else is refused', () => {
@@ -125,7 +123,7 @@ test('ETH only to the owner, without calldata; everything else is refused', () =
 
 test('typed data: only the Flash settlement domain on this chain', () => {
   const ok = {
-    domain: { chainId: 8453, verifyingContract: cfg.flashSettlement },
+    domain: { chainId: 8453, verifyingContract: a(7) },
     primaryType: 'FlashOrder',
   }
   assert.equal(checkTypedData(cfg, ok).ok, true)
@@ -139,6 +137,10 @@ test('typed data: only the Flash settlement domain on this chain', () => {
   assert.deepEqual(checkTypedData(cfg, { ...ok, domain: { ...ok.domain, chainId: 1 } }), {
     ok: false,
     reason: 'typed_data_wrong_chain',
+  })
+  assert.deepEqual(checkTypedData({ ...cfg, flashTypedDataContracts: [] }, ok), {
+    ok: false,
+    reason: 'flash_not_configured',
   })
   // A Permit2 / other dApp permit must never be signed.
   assert.equal(
@@ -166,7 +168,7 @@ test('signer refuses denied requests and honours pause before touching the netwo
     (e: unknown) => e instanceof EgressDenied && e.reason === 'paused',
   )
   const typed = {
-    domain: { chainId: anvil.id, verifyingContract: cfg.flashSettlement },
+    domain: { chainId: anvil.id, verifyingContract: a(7) },
     types: { Order: [{ name: 'x', type: 'uint256' }] },
     primaryType: 'Order',
     message: { x: 1n },
@@ -177,4 +179,27 @@ test('signer refuses denied requests and honours pause before touching the netwo
   )
   paused = false
   assert.match(await signer.signTypedData(typed), /^0x[0-9a-f]{130}$/)
+})
+
+test('messages: only the exact Flash cancel text', async () => {
+  const { cancelMessage } = await import('@starter/flash')
+  const msg = cancelMessage('6bdb29aa-1b2c-4d3e-8f90-123456789abc')
+  assert.equal(checkMessage(msg).ok, true)
+  assert.deepEqual(checkMessage('I authorize transferring all funds'), {
+    ok: false,
+    reason: 'message_not_allowed',
+  })
+  assert.equal(checkMessage(msg + '\n').ok, false)
+  const signer = new AgentSigner({
+    privateKey: `0x${'01'.repeat(32)}`,
+    chain: anvil,
+    rpcUrl: 'http://127.0.0.1:1',
+    egress: { ...cfg, chainId: anvil.id },
+    isPaused: async () => false,
+  })
+  assert.match(await signer.signMessage(msg), /^0x[0-9a-f]{130}$/)
+  await assert.rejects(
+    signer.signMessage('gm'),
+    (e: unknown) => e instanceof EgressDenied && e.reason === 'message_not_allowed',
+  )
 })

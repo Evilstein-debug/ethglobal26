@@ -1,3 +1,4 @@
+import type { FlashApi, FlashChain, LocalFlashStub } from '@starter/flash'
 import type { Address, Chain, PublicClient } from 'viem'
 import type { HumanVerifier } from './auth/human'
 import type { ArenaOps } from './chain/operator'
@@ -16,7 +17,22 @@ export type AppContext = {
   arena: ArenaOps
   keyBox: KeyBox
   humanVerifier: HumanVerifier
-  /** Flash settlement contract on this chain; unset until verified (Phase 3). */
-  flashSettlement?: Address
+  /** Undefined when Flash isn't configured: trades are refused with `flash_not_configured`. */
+  flash?: FlashSetup
+  allowManualTrades: boolean
   now: () => number
+}
+
+export type FlashSetup = {
+  api: FlashApi
+  /** Present only on local anvil (LOCAL TEST ONLY): lets dev tooling move the stub's price. */
+  stub?: LocalFlashStub
+  chain: FlashChain
+  integratorFeeBps: string
+  attributionCode?: string
+  approvalSpenders: Address[]
+  typedDataContracts: Address[]
+  /** Poll cadence while waiting for fills. */
+  pollMs: number
+  fillTimeoutMs: number
 }

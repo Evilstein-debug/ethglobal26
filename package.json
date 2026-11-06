@@ -32,6 +32,7 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.1",
-    "viem": "2.57.14"
+    "viem": "2.57.14",
+    "@starter/flash": "workspace:*"
   }
 }

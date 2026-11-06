@@ -232,7 +232,8 @@ export function agentSigner(ctx: AppContext, agent: AgentRow) {
       tradeLog: ctx.contracts.tradeLog,
       arena: ctx.contracts.arena,
       tokens: [ctx.contracts.usdc, ...(ctx.contracts.weth ? [ctx.contracts.weth] : [])],
-      flashSettlement: ctx.flashSettlement,
+      flashSpenders: ctx.flash?.approvalSpenders ?? [],
+      flashTypedDataContracts: ctx.flash?.typedDataContracts ?? [],
     },
     isPaused: async () => {
       const [p] = await ctx.db

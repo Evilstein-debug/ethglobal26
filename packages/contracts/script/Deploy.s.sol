@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Arena} from "../src/Arena.sol";
 import {TradeLog} from "../src/TradeLog.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
+import {MockWETH} from "../src/mocks/MockWETH.sol";
 
 /// @notice Deploys TradeLog + Arena and writes their addresses to
 ///         packages/shared/deployments/<chainId>.json (read by `pnpm codegen`).
@@ -33,6 +34,7 @@ contract Deploy is Script {
             // LOCAL TEST ONLY: on Base the app uses Circle's USDC, never a mock.
             usdc = address(new MockUSDC());
             vm.serializeAddress(key, "MockUSDC", usdc);
+            vm.serializeAddress(key, "MockWETH", address(new MockWETH()));
         } else {
             usdc = vm.envAddress("USDC_ADDRESS");
             require(usdc.code.length > 0, "USDC_ADDRESS has no code on this chain");

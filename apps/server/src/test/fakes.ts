@@ -63,6 +63,7 @@ export async function startApi(db: Db, overrides: Partial<AppContext> = {}) {
     arena: chain.arena,
     keyBox: new KeyBox('cd'.repeat(32)),
     humanVerifier: devHumanVerifier,
+    allowManualTrades: true,
     now: Date.now,
     ...overrides,
   }

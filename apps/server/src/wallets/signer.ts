@@ -13,7 +13,7 @@ import {
   type TypedDataDefinition,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { checkTx, checkTypedData, type EgressConfig, type TxRequest } from './egress'
+import { checkMessage, checkTx, checkTypedData, type EgressConfig, type TxRequest } from './egress'
 
 export class EgressDenied extends Error {
   constructor(readonly reason: string) {
@@ -64,6 +64,12 @@ export class AgentSigner {
       data: tx.data,
       value: tx.value,
     })
+  }
+
+  /** EIP-191 signature, only for Flash's exact cancel message. */
+  async signMessage(message: string): Promise<Hex> {
+    await this.#guard(checkMessage(message))
+    return this.#account.signMessage!({ message })
   }
 
   async signTypedData(typed: TypedDataDefinition): Promise<Hex> {

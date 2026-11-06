@@ -5,6 +5,7 @@ import type { AppContext } from './context'
 import { errorHandler } from './http'
 import { agentsRouter } from './routes/agents'
 import { ownersRouter } from './routes/owners'
+import { tradesRouter } from './routes/trades'
 
 export function createApp(ctx: AppContext, corsOrigins: string[] = []) {
   const app = express()
@@ -26,11 +27,13 @@ export function createApp(ctx: AppContext, corsOrigins: string[] = []) {
       blockNumber,
       db,
       humanVerifier: ctx.humanVerifier.method,
+      flash: ctx.flash ? ctx.flash.api.kind : 'not_configured',
+      manualTrades: ctx.allowManualTrades,
       contracts: ctx.contracts,
     })
   })
 
-  app.use('/api', ownersRouter(ctx), agentsRouter(ctx))
+  app.use('/api', ownersRouter(ctx), agentsRouter(ctx), tradesRouter(ctx))
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' })
   })

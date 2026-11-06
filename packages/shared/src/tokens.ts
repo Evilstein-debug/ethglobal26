@@ -5,12 +5,12 @@
  * - USDC is the app's only currency (funding, trade budgets, rewards).
  * - WETH is the only tradable asset (TRADE_ASSETS), so an agent can't fake PnL by trading a
  *   token its owner controls.
- * - On local anvil, USDC is the deployed MockUSDC (local test only); there is no WETH because
- *   Flash does not run locally.
+ * - On local anvil, USDC and WETH are the deployed MockUSDC / MockWETH (local test only), used
+ *   with the local Flash stub.
  */
 import type { Address } from 'viem'
 import { base } from 'viem/chains'
-import { mockUsdcAddress } from './generated'
+import { mockUsdcAddress, mockWethAddress } from './generated'
 import { LOCAL_CHAIN_ID } from './chains'
 
 export type TokenSymbol = 'USDC' | 'WETH'
@@ -31,9 +31,14 @@ export type TradeAsset = (typeof TRADE_ASSETS)[number]
 
 export function tokenOn(chainId: number, symbol: TokenSymbol): TokenInfo | undefined {
   if (chainId === base.id) return BASE_TOKENS[symbol]
-  if (chainId === LOCAL_CHAIN_ID && symbol === 'USDC') {
-    const address = (mockUsdcAddress as Partial<Record<number, Address>>)[chainId]
-    return address ? { symbol, address, decimals: USDC_DECIMALS } : undefined
+  if (chainId === LOCAL_CHAIN_ID) {
+    const map = (symbol === 'USDC' ? mockUsdcAddress : mockWethAddress) as Partial<
+      Record<number, Address>
+    >
+    const address = map[chainId]
+    return address
+      ? { symbol, address, decimals: symbol === 'USDC' ? USDC_DECIMALS : 18 }
+      : undefined
   }
   return undefined
 }

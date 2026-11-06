@@ -1,10 +1,11 @@
-import type { PublicClient } from 'viem'
+import { FlashClient, LocalFlashStub } from '@starter/flash'
+import type { Address, PublicClient } from 'viem'
 import { createApp } from './app'
 import { devHumanVerifier, type HumanVerifier } from './auth/human'
 import { chain, pollingInterval, publicClient, rpcUrl } from './chain/client'
 import { contractsOn } from './chain/contracts'
 import { createArenaOps } from './chain/operator'
-import type { AppContext } from './context'
+import type { AppContext, FlashSetup } from './context'
 import { openDb } from './db'
 import { env } from './env'
 import { KeyBox } from './wallets/keybox'
@@ -20,6 +21,51 @@ function humanVerifier(): HumanVerifier {
     return devHumanVerifier
   }
   throw new Error('World ID verification arrives in Phase 6; set HUMAN_VERIFIER=dev on anvil')
+}
+
+function flashSetup(): FlashSetup | undefined {
+  const timing = { pollMs: env.isLocal ? 100 : 1500, fillTimeoutMs: env.isLocal ? 10_000 : 90_000 }
+  if (env.flash.apiKey) {
+    if (!env.flash.approvalSpenders.length || !env.flash.typedDataContracts.length) {
+      console.warn(
+        '[server] FLASH_API_KEY set but FLASH_APPROVAL_SPENDERS / FLASH_TYPED_DATA_CONTRACTS are empty: run scripts/flash-inspect.ts. Trading disabled.',
+      )
+      return undefined
+    }
+    return {
+      api: new FlashClient({ apiKey: env.flash.apiKey, baseUrl: env.flash.baseUrl }),
+      chain: 'base',
+      integratorFeeBps: env.flash.integratorFeeBps,
+      attributionCode: env.flash.attributionCode,
+      approvalSpenders: env.flash.approvalSpenders,
+      typedDataContracts: env.flash.typedDataContracts,
+      ...timing,
+    }
+  }
+  if (!env.isLocal) {
+    console.warn('[server] FLASH_API_KEY not set: trading disabled')
+    return undefined
+  }
+  // LOCAL TEST ONLY: in-memory Flash stand-in with labeled fake addresses and fills.
+  const stubSettlement = '0x000000000000000000000000000000000000F1a5' as Address
+  const stub = new LocalFlashStub({
+    chainId: chain.id,
+    verifyingContract: stubSettlement,
+    spender: stubSettlement,
+    usdc: contracts.usdc,
+    weth: contracts.weth!,
+    priceUsd: 3000,
+  })
+  console.warn('[server] Flash: LOCAL STUB (no real orders; fills are fake)')
+  return {
+    api: stub,
+    stub,
+    chain: 'base',
+    integratorFeeBps: '0',
+    approvalSpenders: [stubSettlement],
+    typedDataContracts: [stubSettlement],
+    ...timing,
+  }
 }
 
 const ctx: AppContext = {
@@ -39,7 +85,8 @@ const ctx: AppContext = {
   }),
   keyBox: new KeyBox(env.masterKey),
   humanVerifier: humanVerifier(),
-  flashSettlement: env.flash.settlement,
+  flash: flashSetup(),
+  allowManualTrades: env.allowManualTrades,
   now: Date.now,
 }
 
