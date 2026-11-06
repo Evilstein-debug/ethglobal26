@@ -309,6 +309,45 @@ export class LocalFlashStub implements FlashApi {
     })
   }
 
+  /**
+   * The stub keeps orders in memory, but positions outlive a server restart. Put an open position
+   * back, under its original order ids, so its bracket can still fire and it can still be closed.
+   */
+  restorePosition(p: {
+    orderId: string
+    bracketOrderId: string
+    funderAddress: string
+    usdcSpent: number
+    entryPrice: number
+    tp: number
+    sl: number
+  }) {
+    const qty = (p.usdcSpent / p.entryPrice) * (1 - this.#o.feeRate)
+    const req = { qty: String(p.usdcSpent), funderAddress: p.funderAddress }
+    const order = this.#newOrder(
+      p.orderId,
+      { ...req, side: 'buy', orderType: 'market' },
+      'ORDER_STATUS_FILLED',
+    )
+    order.filled = {
+      targetAmount: qty.toFixed(18),
+      contraAmount: p.usdcSpent.toFixed(6),
+      averagePrice: p.entryPrice.toFixed(8),
+      averageNotionalPrice: p.entryPrice.toFixed(8),
+    }
+    const bracket = this.#newOrder(
+      p.bracketOrderId,
+      { ...req, side: 'sell', qty: qty.toFixed(18), orderType: 'bracket' },
+      'ORDER_STATUS_ACCEPTED',
+    )
+    this.#orders.set(p.orderId, { order, fills: [] })
+    this.#orders.set(p.bracketOrderId, {
+      order: bracket,
+      fills: [],
+      legs: { tp: p.tp, sl: p.sl },
+    })
+  }
+
   async getOrder(orderId: string, funderAddress: string): Promise<GetOrderResponse> {
     const stored = this.#orders.get(orderId)
     if (

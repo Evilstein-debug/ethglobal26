@@ -50,6 +50,29 @@ async function finish(
   return { status: 'closed', intentId, via, usdcReceived, exitFillTx }
 }
 
+/** LOCAL ONLY: hand the stub the positions it forgot when the server restarted. */
+export async function restoreStubPositions(ctx: AppContext) {
+  const stub = ctx.flash?.stub
+  if (!stub) return
+  const open = await ctx.db
+    .select({ intent: schema.intents, address: schema.agents.address })
+    .from(schema.intents)
+    .innerJoin(schema.agents, eq(schema.agents.id, schema.intents.agentId))
+    .where(eq(schema.intents.state, 'EXECUTED'))
+  for (const { intent, address } of open) {
+    if (!intent.flashOrderId || !intent.flashBracketOrderId) continue
+    stub.restorePosition({
+      orderId: intent.flashOrderId,
+      bracketOrderId: intent.flashBracketOrderId,
+      funderAddress: getAddress(address),
+      usdcSpent: (intent.usdcSpent ?? intent.sizeQuote) / 1e6,
+      entryPrice: Number(intent.entryRefPrice),
+      tp: Number(intent.targetPrice),
+      sl: Number(intent.stopPrice),
+    })
+  }
+}
+
 /** Read-only check: did a bracket leg fire? Returns the close, or null if still open. */
 export async function syncExit(ctx: AppContext, intentId: string): Promise<CloseResult | null> {
   const flash = ctx.flash

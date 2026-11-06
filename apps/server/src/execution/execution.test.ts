@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import { LocalFlashStub } from '@starter/flash'
 import { canonicalHash } from '@starter/shared/canonical'
 import { tradeLogAbi } from '@starter/shared/generated'
 import { eq } from 'drizzle-orm'
@@ -7,7 +8,7 @@ import { encodeFunctionData, erc20Abi, type Address, type Hex } from 'viem'
 import { schema } from '../db'
 import { createAgent, getAgent, withdraw } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
-import { closePosition, realizedPnl, syncExit } from './close'
+import { closePosition, realizedPnl, restoreStubPositions, syncExit } from './close'
 import { executeTrade, newIntentId, recoverStuckIntents } from './trade'
 
 const policy = { perTradeCap: '5', dailyCap: '20' }
@@ -265,6 +266,29 @@ describe('trade pipeline on anvil', { skip: skipReason }, () => {
     const row = await getAgent(ctx, agentId)
     await assert.rejects(withdraw(ctx, row, { asset: 'WETH', amount: '0.001' }), /position_open/)
     await withdraw(ctx, row, { asset: 'USDC', amount: '1' })
+  })
+
+  test('a server restart keeps open stub positions: the bracket fires and closing works', async () => {
+    const first = await setup()
+    await executeTrade(first.ctx, intentFor(first.agent))
+    const fresh = new LocalFlashStub({
+      chainId: first.ctx.chain.id,
+      verifyingContract: first.contracts.usdc,
+      spender: first.contracts.usdc,
+      usdc: first.contracts.usdc,
+      weth: first.contracts.weth!,
+      priceUsd: 3000,
+    })
+    const ctx = { ...first.ctx, flash: { ...first.ctx.flash!, api: fresh, stub: fresh } }
+    const [row] = await ctx.db.select().from(schema.intents)
+    await assert.rejects(syncExit(ctx, row!.intentId), /NOT_FOUND/)
+
+    await restoreStubPositions(ctx)
+    assert.equal(await syncExit(ctx, row!.intentId), null, 'position is open again')
+    fresh.setPrice(3100)
+    const exit = await syncExit(ctx, row!.intentId)
+    assert.ok(exit?.status === 'closed' && exit.via === 'bracket')
+    assert.ok(exit.usdcReceived > row!.usdcSpent!, 'exit priced from the restored position')
   })
 
   test('close is a no-op for intents that never executed', async () => {
