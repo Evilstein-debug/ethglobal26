@@ -7,7 +7,7 @@ import type { Address } from 'viem'
 import { schema } from '../db'
 import { createAgent, getAgent, setPaused, updatePolicy } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
-import { tick, tickMarkets, type MarketConfig } from '../rounds/scheduler'
+import { tick, tickAgents, tickMarkets, type MarketConfig } from '../rounds/scheduler'
 import { think } from './decide'
 import { localModel } from './local-model'
 
@@ -122,6 +122,53 @@ describe('the agent decides for itself, on anvil', { skip: skipReason }, () => {
     assert.equal(rows.at(-1)!.rationale, 'nothing clear today')
     assert.equal(w.stub.submitted.length, 0)
     assert.equal((await w.db.select().from(schema.rounds)).length, 0, 'no market was reserved')
+  })
+
+  test('agents think in parallel: a slow model call holds up nobody else', async () => {
+    let release = () => undefined as void
+    const gate = new Promise<void>((r) => (release = r))
+    const w = await world(
+      new LocalLLMStub(async (req) => {
+        if (
+          JSON.parse(req.user.slice(req.user.indexOf('{'), req.user.lastIndexOf('}') + 1)).you
+            .mode === 'both'
+        )
+          await gate
+        return JSON.stringify({ action: 'wait', rationale: 'done' })
+      }),
+    )
+    const slowOne = tickAgents(w.ctx, cfg) // the trader blocks on its model call
+    for (let i = 0; (await statusOf(w, w.predictor.id).catch(() => null))?.state !== 'idle'; i++) {
+      assert.ok(i < 300, 'the predictor finished while the trader was still thinking')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    assert.equal((await statusOf(w, w.trader.id)).state, 'thinking')
+    assert.equal(await tickAgents(w.ctx, cfg), 2, 'only the two idle agents start again')
+    assert.equal((await w.db.select().from(schema.decisions)).length, 0)
+    release()
+    await slowOne
+    assert.equal((await w.db.select().from(schema.decisions)).length, 1)
+  })
+
+  test('two agents buying at once get separate markets', async () => {
+    const w = await world()
+    const alice = (await w.db.select().from(schema.owners)).find(
+      (o) => o.wallet !== w.trader.ownerWallet,
+    )!
+    const gamma = await createAgent(w.ctx, alice.wallet as Address, {
+      name: 'Gamma',
+      mode: 'trade',
+      policy,
+    })
+    await w.fund(gamma.address as Address, '20')
+    await Promise.all([
+      think(w.ctx, w.trader, cfg),
+      think(w.ctx, await getAgent(w.ctx, gamma.id), cfg),
+    ])
+    await tickMarkets(w.ctx, cfg)
+    const rounds = await w.db.select().from(schema.rounds)
+    assert.equal(rounds.length, 2)
+    assert.equal((await w.db.select().from(schema.roundEntries)).length, 2)
   })
 
   test('injection: a hijacked model cannot move money', async () => {

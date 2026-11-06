@@ -44,6 +44,7 @@ export type MarketConfig = {
 }
 
 type Market = typeof schema.rounds.$inferSelect
+type Agent = typeof schema.agents.$inferSelect
 
 const log = (...args: unknown[]) => console.log('[markets]', ...args)
 
@@ -71,22 +72,20 @@ const isLocked = (ctx: AppContext, id: number) =>
 
 /** A market id for a trade about to happen: the intent commits to it before anything is sent. */
 export async function reserveMarket(ctx: AppContext, cfg: MarketConfig): Promise<Market> {
+  const epochId = await ensureEpoch(ctx, cfg)
   const [last] = await ctx.db.select().from(schema.rounds).orderBy(desc(schema.rounds.id)).limit(1)
-  let id = (last?.id ?? 0) + 1
-  // Fresh database, same contracts: an id already used onchain can never open again.
-  while (await isLocked(ctx, id)) id++
-  const now = ctx.now()
-  const [market] = await ctx.db
-    .insert(schema.rounds)
-    .values({
-      id,
-      phase: 'OPENING',
-      epochId: await ensureEpoch(ctx, cfg),
-      startsAt: now,
-      phaseEndsAt: now,
-    })
-    .returning()
-  return market!
+  // Agents think in parallel, so an id can be taken between the read and the insert.
+  for (let id = (last?.id ?? 0) + 1; ; id++) {
+    // Fresh database, same contracts: an id already used onchain can never open again.
+    if (await isLocked(ctx, id)) continue
+    const now = ctx.now()
+    const [market] = await ctx.db
+      .insert(schema.rounds)
+      .values({ id, phase: 'OPENING', epochId, startsAt: now, phaseEndsAt: now })
+      .onConflictDoNothing()
+      .returning()
+    if (market) return market
+  }
 }
 
 async function setPhase(ctx: AppContext, id: number, fields: Partial<Market>) {
@@ -321,27 +320,35 @@ export async function settleDueEpochs(ctx: AppContext, cfg: MarketConfig) {
   }
 }
 
-/** Let every agent that's due think, one at a time. Returns how many thought. */
+const thinking = new Set<string>()
+
+async function thinkOnce(ctx: AppContext, cfg: MarketConfig, agent: Agent) {
+  thinking.add(agent.id)
+  try {
+    const res = await think(ctx, agent, cfg)
+    log(`${agent.name}: ${res.action}${'reason' in res ? ` (${res.reason})` : ''}`)
+  } catch (err) {
+    console.error(`[agents] ${agent.id} failed to think:`, err)
+    const detail = err instanceof Error ? err.message : String(err)
+    await setStatus(ctx, agent.id, 'error', detail, {
+      nextThinkAt: ctx.now() + cfg.thinkEveryMs,
+    }).catch(() => undefined)
+  } finally {
+    thinking.delete(agent.id)
+  }
+}
+
+/** Every agent that's due starts thinking, each on its own: a slow one holds up nobody else. */
 export async function tickAgents(ctx: AppContext, cfg: MarketConfig) {
   const agents = await ctx.db.select().from(schema.agents).where(eq(schema.agents.status, 'active'))
   const schedule = await ctx.db.select().from(schema.agentStatus)
-  let thought = 0
-  for (const agent of agents) {
-    const due = schedule.find((s) => s.agentId === agent.id)?.nextThinkAt ?? 0
-    if (ctx.now() < due) continue
-    thought++
-    try {
-      const res = await think(ctx, agent, cfg)
-      log(`${agent.name}: ${res.action}${'reason' in res ? ` (${res.reason})` : ''}`)
-    } catch (err) {
-      console.error(`[agents] ${agent.id} failed to think:`, err)
-      const detail = err instanceof Error ? err.message : String(err)
-      await setStatus(ctx, agent.id, 'error', detail, {
-        nextThinkAt: ctx.now() + cfg.thinkEveryMs,
-      })
-    }
-  }
-  return thought
+  const due = agents.filter(
+    (a) =>
+      !thinking.has(a.id) &&
+      ctx.now() >= (schedule.find((s) => s.agentId === a.id)?.nextThinkAt ?? 0),
+  )
+  await Promise.all(due.map((a) => thinkOnce(ctx, cfg, a)))
+  return due.length
 }
 
 /** One pass of everything that's due (tests and local tooling). */
@@ -368,7 +375,8 @@ export function startScheduler(ctx: AppContext, cfg: MarketConfig, everyMs = 200
   }
   const timers = [
     loop('markets', () => tickMarkets(ctx, cfg)),
-    loop('agents', () => tickAgents(ctx, cfg)),
+    // Not awaited: an agent mid-thought just sits out, and new ones start without waiting for it.
+    loop('agents', async () => void tickAgents(ctx, cfg).catch(console.error)),
   ]
   return () => timers.forEach(clearInterval)
 }
