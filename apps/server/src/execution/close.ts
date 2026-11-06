@@ -12,7 +12,7 @@ import { USDC_DECIMALS } from '@starter/shared/tokens'
 import type { AppContext } from '../context'
 import { schema } from '../db'
 import { agentSigner, balancesOf, getAgent } from '../services/agents'
-import { waitForTerminal } from './trade'
+import { integratorFee, waitForTerminal } from './trade'
 import { noteFlashCancel, stopTwap } from './twap'
 
 export type CloseResult =
@@ -160,7 +160,7 @@ export async function closePosition(ctx: AppContext, intentId: string): Promise<
       orderType: 'market' as const,
       evmUsePermit2: false,
       forceMinimalAllowance: true,
-      flashIntegratorFeeBps: flash.integratorFeeBps,
+      ...integratorFee(flash),
     }
     const quote = await flash.api.quote({ ...common, funderAddress: funder })
     if (!quote.evm?.orderTypedData || quote.evm.permitTypedData)

@@ -82,6 +82,11 @@ const ORDER_TYPES = {
   ],
 } as const
 
+/** A limit's price in USDC per WETH: the pair rate, or the USD price (equal for a USDC pair). */
+function limitOf(req: QuoteRequest) {
+  return Number(req.limitCrossPrice ?? req.limitNotionalPrice)
+}
+
 export class LocalFlashStub implements FlashApi {
   readonly kind = 'local-stub' as const
   priceUsd: number
@@ -165,8 +170,16 @@ export class LocalFlashStub implements FlashApi {
   async quote(req: QuoteRequest): Promise<QuoteResponse> {
     if (req.orderType !== 'market' && req.orderType !== 'twap' && req.orderType !== 'limit')
       throw new Error(`local stub: only market, limit and twap orders (got ${req.orderType})`)
-    if (req.orderType === 'limit' && !(Number(req.limitNotionalPrice) > 0))
-      throw new Error('local stub: a limit order needs limitNotionalPrice')
+    // Mirrors Flash v1 (checked 2026-11-07 with read-only quotes): a zero integrator fee is a
+    // validation error, and a limit entry with an attached bracket must use limitCrossPrice.
+    if (req.flashIntegratorFeeBps !== undefined && !(Number(req.flashIntegratorFeeBps) > 0))
+      throw new Error('local stub: flashIntegratorFeeBps must be a positive decimal')
+    if (req.orderType === 'limit' && req.attachedBracket && req.limitNotionalPrice)
+      throw new Error(
+        'local stub: attached_bracket limit entries require limit_cross_price (limit_notional_price is not supported with the block)',
+      )
+    if (req.orderType === 'limit' && !(limitOf(req) > 0))
+      throw new Error('local stub: a limit order needs limitCrossPrice or limitNotionalPrice')
     if (req.orderType === 'twap') {
       if (!((req.durationSeconds ?? 0) >= this.#o.minTwapSeconds))
         throw new Error(`local stub: TWAP duration must be at least ${this.#o.minTwapSeconds}s`)
@@ -178,10 +191,7 @@ export class LocalFlashStub implements FlashApi {
     const qty = Number(req.qty)
     if (!(qty > 0)) throw new Error('local stub: qty must be > 0')
     // A limit buy is quoted at its limit when that is below the market.
-    const price =
-      req.orderType === 'limit'
-        ? Math.min(this.priceUsd, Number(req.limitNotionalPrice))
-        : this.priceUsd
+    const price = req.orderType === 'limit' ? Math.min(this.priceUsd, limitOf(req)) : this.priceUsd
     const buy = req.side === 'buy'
     const grossOut = buy ? qty / price : qty * price
     const out = grossOut * (1 - this.#o.feeRate)
@@ -285,7 +295,7 @@ export class LocalFlashStub implements FlashApi {
       this.#advance(entry) // the first tranche goes at once
     } else if (stored.req.orderType === 'limit') {
       entry.limit = {
-        price: Number(stored.req.limitNotionalPrice),
+        price: limitOf(stored.req),
         expiresAt: stored.req.expireTime ? Date.parse(stored.req.expireTime) : null,
       }
     } else {

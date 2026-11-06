@@ -23,7 +23,10 @@ export class FlashApiError extends Error {
     message: string,
     readonly details?: unknown,
   ) {
-    super(`Flash ${status} ${code}: ${message}`)
+    // Validation errors name the offending field only in `details`, so keep it in the message.
+    super(
+      `Flash ${status} ${code}: ${message}${details ? ` ${JSON.stringify(details).slice(0, 300)}` : ''}`,
+    )
     this.name = 'FlashApiError'
   }
 }

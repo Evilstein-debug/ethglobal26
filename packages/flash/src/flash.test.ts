@@ -8,6 +8,20 @@ import { LocalFlashStub } from './stub'
 
 const ORDER_ID = '6bdb29aa-1b2c-4d3e-8f90-123456789abc'
 
+test('stub, like Flash: a zero integrator fee and a USD-priced bracketed limit are rejected', async () => {
+  const stub = new LocalFlashStub(stubOpts)
+  const { limitCrossPrice: _c, ...usdPriced } = limitRequest('2950')
+  await assert.rejects(
+    stub.quote({ ...usdPriced, limitNotionalPrice: '2950' }),
+    /limit_cross_price/,
+  )
+  await assert.rejects(
+    stub.quote({ ...limitRequest('2950'), flashIntegratorFeeBps: '0' }),
+    /positive decimal/,
+  )
+  assert.ok((await stub.quote(limitRequest('2950'))).quoteId)
+})
+
 test('cancel message matches the documented bytes', () => {
   const msg = cancelMessage(ORDER_ID)
   assert.equal(msg, `Definitive Flash v1 — Cancel Order\nOrder: ${ORDER_ID}`)
@@ -123,7 +137,6 @@ async function buyWithBracket(stub: LocalFlashStub, signer = funder) {
     qty: '5',
     orderType: 'market',
     funderAddress: funder.address,
-    flashIntegratorFeeBps: '0',
     attachedBracket: { takeProfit: { notionalPrice: '3060' }, stopLoss: { notionalPrice: '2950' } },
   })
   const sign = (json: string) => signer.signTypedData(JSON.parse(json))
@@ -136,7 +149,6 @@ async function buyWithBracket(stub: LocalFlashStub, signer = funder) {
     qty: '5',
     orderType: 'market',
     funderAddress: funder.address,
-    flashIntegratorFeeBps: '0',
     quoteId: q.quoteId,
     userSignature: await sign(q.evm!.orderTypedData!),
     evmOrderTypedData: q.evm!.orderTypedData!,
@@ -241,7 +253,6 @@ function twapRequest(buckets = 4, durationSeconds = 400) {
     durationSeconds,
     twapBucketCount: buckets,
     funderAddress: funder.address,
-    flashIntegratorFeeBps: '0',
     attachedBracket: { takeProfit: { notionalPrice: '3060' }, stopLoss: { notionalPrice: '2950' } },
   } as const
 }
@@ -353,10 +364,9 @@ function limitRequest(limit: string, expireTime?: string) {
     side: 'buy',
     qty: '5',
     orderType: 'limit',
-    limitNotionalPrice: limit,
+    limitCrossPrice: limit,
     ...(expireTime ? { expireTime } : {}),
     funderAddress: funder.address,
-    flashIntegratorFeeBps: '0',
     attachedBracket: { takeProfit: { notionalPrice: '3060' }, stopLoss: { notionalPrice: '2900' } },
   } as const
 }

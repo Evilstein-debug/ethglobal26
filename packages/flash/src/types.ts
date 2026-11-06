@@ -59,6 +59,11 @@ export type QuoteRequest = {
   twapBucketCount?: number
   /** Limit only. USD price of the target asset: a buy fills at or below it. Same on submit. */
   limitNotionalPrice?: string
+  /**
+   * Limit only. Pair rate: contraAsset units per one targetAsset (USDC per WETH). Flash v1 requires
+   * it instead of limitNotionalPrice when the limit entry carries an attachedBracket. Same on submit.
+   */
+  limitCrossPrice?: string
   attachedBracket?: { takeProfit: BracketLeg; stopLoss: BracketLeg; expireTime?: string }
 }
 

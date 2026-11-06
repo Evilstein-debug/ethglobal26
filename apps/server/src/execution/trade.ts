@@ -148,6 +148,14 @@ export async function waitForFirstFill(flash: FlashSetup, orderId: string, funde
 }
 
 /**
+ * Flash rejects flashIntegratorFeeBps "0" ("must be a positive decimal"), so a zero fee is sent as
+ * no field at all. A positive fee goes on quote and submit alike (both spread `common`).
+ */
+export function integratorFee(flash: Pick<FlashSetup, 'integratorFeeBps'>) {
+  return Number(flash.integratorFeeBps) > 0 ? { flashIntegratorFeeBps: flash.integratorFeeBps } : {}
+}
+
+/**
  * The risk guard. Code, not the model, refuses an asset Flash flags as risky before anything is
  * reserved, committed or signed. A failing lookup also refuses: no answer is not a yes. The one
  * exception (canonical Base WETH while Flash rations /search) is in riskGuard.
@@ -333,16 +341,17 @@ export async function executeTrade(
       orderType: twap ? ('twap' as const) : limit ? ('limit' as const) : ('market' as const),
       // Quote and submit must carry the same tranche count; the duration is quote-time only.
       ...(twap ? { twapBucketCount: twap.buckets } : {}),
-      // A limit buy fills at or below its price and is cancelled by Flash at its expiry.
+      // A limit buy fills at or below its price and is cancelled by Flash at its expiry. With an
+      // attached bracket Flash v1 only accepts the pair rate (USDC per WETH), not a USD price.
       ...(limit
         ? {
-            limitNotionalPrice: limit.limitPrice,
+            limitCrossPrice: limit.limitPrice,
             expireTime: new Date(restingUntil).toISOString(),
           }
         : {}),
       evmUsePermit2: false,
       forceMinimalAllowance: true,
-      flashIntegratorFeeBps: flash.integratorFeeBps,
+      ...integratorFee(flash),
     }
     const quoteRequest = {
       ...common,
