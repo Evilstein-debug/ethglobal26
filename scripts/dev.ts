@@ -87,5 +87,5 @@ startApp('web', '@starter/web', {
 
 console.log('\n[dev] web http://localhost:3000 · server http://localhost:8787 · rpc', LOCAL_RPC_URL)
 console.log(
-  '[dev] to transact, click "Get test funds (local only)" in the app, or import an anvil dev account.\n',
+  '[dev] to transact, click "Add 1,000 USDC + 20 ETH to my wallet" in the app, or import an anvil dev account.\n',
 )

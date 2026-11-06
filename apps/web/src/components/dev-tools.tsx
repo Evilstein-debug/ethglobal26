@@ -2,6 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
+import { useAccount } from 'wagmi'
 import { api, errorText, useHealth } from '@/lib/api'
 
 const LOCAL_CHAIN_ID = 31337
@@ -38,20 +39,21 @@ function useDevCall() {
   return { busy, msg, run }
 }
 
-/** LOCAL ANVIL ONLY: 100 mock USDC + 1 ETH for gas, for an agent's own wallet. */
-export function DevAgentFunds({ address }: { address: string }) {
+/** LOCAL ANVIL ONLY: fills the connected wallet, so it can fund agents the way real users do. */
+export function DevWalletFunds() {
+  const { address } = useAccount()
   const { data: health } = useHealth()
   const { busy, msg, run } = useDevCall()
-  if (health?.chainId !== LOCAL_CHAIN_ID) return null
+  if (!address || health?.chainId !== LOCAL_CHAIN_ID) return null
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <DevButton
         busy={busy}
         onClick={() =>
-          run('/api/dev/faucet', { address }, 'Sent 100 mock USDC + 1 ETH to this agent.')
+          run('/api/dev/faucet', { address }, 'Added 1,000 mock USDC + 20 ETH to your wallet.')
         }
       >
-        {busy ? 'Sending…' : 'Give this agent test funds + gas (local only)'}
+        {busy ? 'Sending…' : 'Add 1,000 USDC + 20 ETH to my wallet (local only)'}
       </DevButton>
       {msg && <span className="text-muted">{msg}</span>}
     </div>

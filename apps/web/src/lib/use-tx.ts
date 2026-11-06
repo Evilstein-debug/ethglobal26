@@ -2,10 +2,18 @@
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Hash } from 'viem'
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  InsufficientFundsError,
+  UserRejectedRequestError,
+  type Address,
+  type Hash,
+} from 'viem'
 import { useConfig } from 'wagmi'
 import {
   getAccount,
+  sendTransaction,
   simulateContract,
   waitForTransactionReceipt,
   writeContract,
@@ -42,6 +50,8 @@ function describeError(error: unknown) {
     // OpenZeppelin ERC20 custom errors (not in viem's erc20Abi).
     if (error.message.includes('0xe450d38c')) return 'Insufficient token balance in your wallet'
     if (error.message.includes('0xfb8f41b2')) return 'Insufficient token allowance'
+    if (error.walk((e) => e instanceof InsufficientFundsError))
+      return 'Not enough ETH in your wallet'
     return error.shortMessage
   }
   return error instanceof Error ? error.message : String(error)
@@ -56,15 +66,12 @@ export function useTx() {
   const queryClient = useQueryClient()
   const [state, setState] = useState<TxState>({ status: 'idle' })
 
-  async function send(params: SimulateContractParameters) {
+  async function track(submit: (account: Address) => Promise<Hash>) {
     const { address: account } = getAccount(config)
     if (!account) return setState({ status: 'failed', error: 'Connect a wallet first' })
     let hash: Hash | undefined
     try {
-      setState({ status: 'simulating' })
-      const { request } = await simulateContract(config, { ...params, account })
-      setState({ status: 'signing' })
-      hash = await writeContract(config, request)
+      hash = await submit(account)
       setState({ status: 'pending', hash })
       const receipt = await waitForTransactionReceipt(config, { hash })
       if (receipt.status !== 'success') throw new Error('Transaction reverted')
@@ -76,7 +83,22 @@ export function useTx() {
     }
   }
 
+  const send = (params: SimulateContractParameters) =>
+    track(async (account) => {
+      setState({ status: 'simulating' })
+      const { request } = await simulateContract(config, { ...params, account })
+      setState({ status: 'signing' })
+      return writeContract(config, request)
+    })
+
+  /** A plain ETH transfer from the connected wallet. */
+  const sendEth = (to: Address, value: bigint) =>
+    track(async () => {
+      setState({ status: 'signing' })
+      return sendTransaction(config, { to, value })
+    })
+
   const busy =
     state.status === 'simulating' || state.status === 'signing' || state.status === 'pending'
-  return { state, send, busy }
+  return { state, send, sendEth, busy }
 }

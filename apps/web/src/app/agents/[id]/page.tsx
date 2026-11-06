@@ -4,9 +4,9 @@ import { explorerAddressUrl } from '@starter/shared/chains'
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import { useState } from 'react'
-import { erc20Abi, parseUnits } from 'viem'
-import { useAccount } from 'wagmi'
-import { DevAgentFunds } from '@/components/dev-tools'
+import { erc20Abi, formatUnits, parseEther, parseUnits } from 'viem'
+import { useAccount, useBalance, useReadContract } from 'wagmi'
+import { DevWalletFunds } from '@/components/dev-tools'
 import { TxStatus } from '@/components/tx-status'
 import { Badge, Button, Empty, Field, Panel } from '@/components/ui'
 import { api, errorText, useApi, useHealth, useOwnerAuth } from '@/lib/api'
@@ -44,12 +44,34 @@ type Intent = {
   failReason: string | null
 }
 
+/** What the connected wallet can send, so a failed send explains itself. */
+function YourWallet({ usdc }: { usdc?: `0x${string}` }) {
+  const { address } = useAccount()
+  const { data: eth } = useBalance({ address })
+  const { data: tokens } = useReadContract({
+    address: usdc,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(usdc && address) },
+  })
+  if (tokens == null || !eth) return null
+  return (
+    <p className="text-sm text-muted">
+      Your wallet: {formatUnits(tokens, 6)} USDC · {Number(formatUnits(eth.value, 18)).toFixed(4)}{' '}
+      ETH
+    </p>
+  )
+}
+
 function OwnerControls({ agent }: { agent: AgentView }) {
   const getAuth = useOwnerAuth()
   const queryClient = useQueryClient()
   const { data: health } = useHealth()
   const fund = useTx()
+  const gas = useTx()
   const [amount, setAmount] = useState('5')
+  const [gasAmount, setGasAmount] = useState('0.01')
   const [withdrawAmt, setWithdrawAmt] = useState('1')
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -70,7 +92,8 @@ function OwnerControls({ agent }: { agent: AgentView }) {
 
   return (
     <Panel title="Owner controls">
-      <div className="grid gap-3 md:grid-cols-2">
+      <YourWallet usdc={health?.contracts.usdc} />
+      <div className="grid gap-3 md:grid-cols-3">
         <div className="flex flex-col gap-2">
           <Field
             label="Fund with USDC"
@@ -93,8 +116,24 @@ function OwnerControls({ agent }: { agent: AgentView }) {
             Send USDC to agent
           </Button>
           <TxStatus state={fund.state} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Field
+            label="Fund with ETH for gas"
+            value={gasAmount}
+            onChange={(e) => setGasAmount(e.target.value)}
+            inputMode="decimal"
+          />
+          <Button
+            variant="outline"
+            disabled={gas.busy}
+            onClick={() => gas.sendEth(agent.address, parseEther(gasAmount || '0'))}
+          >
+            Send ETH for gas
+          </Button>
+          <TxStatus state={gas.state} />
           <p className="text-xs text-muted">
-            Also send a little ETH for gas (commits, approvals, predictions).
+            Agents pay gas for commits, approvals and predictions. A little goes a long way.
           </p>
         </div>
         <div className="flex flex-col gap-2">
@@ -121,7 +160,7 @@ function OwnerControls({ agent }: { agent: AgentView }) {
           )}
         </div>
       </div>
-      <DevAgentFunds address={agent.address} />
+      <DevWalletFunds />
       {msg && <p className="text-sm">{msg}</p>}
     </Panel>
   )

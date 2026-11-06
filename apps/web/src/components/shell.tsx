@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useQueryClient } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useAccount } from 'wagmi'
 import { ConnectButton } from '@/components/connect-button'
-import { api, errorText, useApi, useHealth } from '@/lib/api'
+import { DevWalletFunds } from '@/components/dev-tools'
+import { useApi, useHealth } from '@/lib/api'
 import { targetChain } from '@/lib/env'
 
 const NAV = [
@@ -34,40 +34,6 @@ function Labels() {
           {l}
         </span>
       ))}
-    </div>
-  )
-}
-
-/** LOCAL ANVIL ONLY: one click for 100 mock USDC + 1 ETH to the connected wallet. */
-function DevFaucet() {
-  const { address } = useAccount()
-  const { data: health } = useHealth()
-  const queryClient = useQueryClient()
-  const [msg, setMsg] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  if (!address || health?.chainId !== 31337) return null
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <button
-        className="border border-fg px-2 py-1 font-mono uppercase tracking-widest hover:bg-fg hover:text-bg disabled:opacity-40"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true)
-          setMsg(null)
-          try {
-            await api('/api/dev/faucet', { body: { address } })
-            await queryClient.invalidateQueries()
-            setMsg('Sent 100 mock USDC + 1 ETH to your wallet (local anvil only).')
-          } catch (err) {
-            setMsg(errorText(err))
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        {busy ? 'Sending…' : 'Get test funds (local only)'}
-      </button>
-      {msg && <span className="text-muted">{msg}</span>}
     </div>
   )
 }
@@ -116,7 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <Labels />
-        <DevFaucet />
+        <DevWalletFunds />
       </header>
       <main className="flex flex-1 flex-col gap-6">{children}</main>
       <footer className="border-t border-line pt-4 text-xs text-muted">
