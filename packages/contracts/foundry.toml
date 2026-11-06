@@ -15,14 +15,14 @@ remappings = [
 # The deploy script writes addresses here for codegen.
 fs_permissions = [{ access = "read-write", path = "../shared/deployments" }]
 
-# Named RPCs: `--rpc-url sepolia`. Forge loads ./.env automatically.
+# Named RPCs: `--rpc-url base`. Forge loads ./.env automatically.
 [rpc_endpoints]
 localhost = "http://127.0.0.1:8545"
-sepolia = "${SEPOLIA_RPC_URL}"
+base = "${BASE_RPC_URL}"
 
-# Explorer API keys for `--verify` / `forge verify-contract`. See README "Verifying".
+# Explorer API key for `--verify` / `forge verify-contract` (Etherscan API V2: one key, all chains).
 [etherscan]
-sepolia = { key = "${ETHERSCAN_API_KEY}" }
+base = { key = "${ETHERSCAN_API_KEY}", chain = 8453 }
 
 [fuzz]
 runs = 256

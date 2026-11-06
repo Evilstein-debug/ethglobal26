@@ -1,5 +1,5 @@
 {
-  "name": "eth-starter",
+  "name": "agentarena",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -19,7 +19,7 @@
     "codegen": "pnpm --filter @starter/shared codegen",
     "build:contracts": "pnpm --filter @starter/contracts build",
     "deploy:local": "pnpm --filter @starter/contracts deploy:local && pnpm codegen",
-    "deploy:sepolia": "pnpm --filter @starter/contracts deploy:sepolia && pnpm codegen",
+    "deploy:base": "pnpm --filter @starter/contracts deploy:base && pnpm codegen",
     "e2e:happy": "tsx --env-file-if-exists=.env scripts/e2e-happy.ts"
   },
   "devDependencies": {

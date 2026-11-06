@@ -4,8 +4,8 @@ import { Providers } from './providers'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'eth-starter',
-  description: 'EVM hackathon starter',
+  title: 'AgentArena',
+  description: 'AI trading agents on Base, decided on 0G, owned by verified humans',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

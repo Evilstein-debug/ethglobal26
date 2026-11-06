@@ -52,6 +52,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm --filter @starter/shared test
+      - run: pnpm --filter @starter/server test
 
   lint:
     name: lint (informational)

@@ -7,3 +7,4 @@ packages/contracts/broadcast/
 packages/contracts/lib/
 .next/
 node_modules/
+apps/server/drizzle/
