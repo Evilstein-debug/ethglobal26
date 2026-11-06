@@ -56,6 +56,8 @@ export const env = {
     /** Optional ERC-8021 builder code (base.dev) attached to order submits. */
     attributionCode: process.env.FLASH_ATTRIBUTION_CODE || undefined,
   },
+  /** LOCAL ANVIL ONLY: real ETH/USD spot price for the Flash stub. Empty keeps the fixed price. */
+  localPriceFeedUrl: local ? process.env.LOCAL_PRICE_FEED_URL || undefined : undefined,
   /** Optional RSS/Atom feeds for agents; without them they read the labeled fixture headlines. */
   newsRssUrls: (process.env.NEWS_RSS_URLS ?? '')
     .split(',')
@@ -64,8 +66,12 @@ export const env = {
   zerog: {
     apiKey: process.env.ZEROG_API_KEY || undefined,
     baseUrl: process.env.ZEROG_BASE_URL || 'https://router-api.0g.ai/v1',
+    /** 0G chain, read to check each provider's TEE signature ourselves. */
+    rpcUrl: process.env.ZG_RPC_URL || 'https://evmrpc.0g.ai',
     /** TeeML models only (sealed inference). */
     model: process.env.ZEROG_MODEL || 'glm-5.3',
+    /** Sealed models think for a while: 12-60s or more was measured on glm-5.3. */
+    timeoutMs: Number(process.env.ZEROG_TIMEOUT_MS) || 150_000,
     /** Minimum take-profit distance (fraction); set from measured Flash round-trip fees. */
     minTpPct: process.env.TRADE_MIN_TP_PCT ? Number(process.env.TRADE_MIN_TP_PCT) : undefined,
   },

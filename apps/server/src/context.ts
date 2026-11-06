@@ -38,6 +38,8 @@ export type AppContext = {
     environment: 'production' | 'staging'
     sign: () => unknown
   }
+  /** The Flash stub is following a real price feed, so its price can't be set by hand. */
+  livePrices?: boolean
   /** LOCAL ANVIL ONLY: enables /api/dev/* helpers (stub price, manual round tick). */
   devTools?: boolean
   /** LOCAL ANVIL ONLY: mint mock USDC and send ETH to an address (dev faucet). */

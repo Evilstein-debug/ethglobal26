@@ -100,6 +100,7 @@ export function tradesRouter(ctx: AppContext) {
       '/dev/flash-stub/price',
       handler(async (req, res) => {
         const { priceUsd } = z.object({ priceUsd: z.number().positive() }).parse(req.body)
+        if (ctx.livePrices) throw new HttpError(409, 'price_is_live')
         stub.setPrice(priceUsd)
         res.json({ priceUsd, note: 'local Flash stub; not a real market' })
       }),

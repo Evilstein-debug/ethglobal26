@@ -67,6 +67,7 @@ export type Health = {
   chainId: number
   humanVerifier: 'world' | 'dev'
   flash: 'flash' | 'local-stub' | 'not_configured'
+  livePrice?: number
   llm: { kind: '0g' | 'local-stub'; model: string } | 'not_configured'
   contracts: {
     tradeLog: `0x${string}`

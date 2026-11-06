@@ -1,10 +1,14 @@
+import { createZGComputeNetworkBroker } from '@0gfoundation/0g-compute-ts-sdk'
 import { FlashClient, LocalFlashStub } from '@starter/flash'
-import { mockUsdcAbi } from '@starter/shared/generated'
+import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
+import { ethers } from 'ethers'
 import {
   createWalletClient,
+  getAddress,
   http,
   parseEther,
   parseUnits,
+  zeroHash,
   type Address,
   type PublicClient,
 } from 'viem'
@@ -19,10 +23,12 @@ import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from './context'
 import { ZeroGClient, type LLMClient } from '@starter/zerog'
 import { localModel } from './brain/local-model'
 import { newsReader } from './brain/news'
-import { openDb } from './db'
+import { openDb, schema } from './db'
 import { env } from './env'
+import { restoreStubPositions } from './execution/close'
 import { startPredictionIndexer } from './rounds/indexer'
 import { startScheduler } from './rounds/scheduler'
+import { startPriceFeed } from './services/price-feed'
 import { KeyBox } from './wallets/keybox'
 
 // Server-only work: agent keys, policy engine, 0G and Flash calls, scheduler, resolver.
@@ -99,12 +105,36 @@ function flashSetup(): FlashSetup | undefined {
   }
 }
 
+/**
+ * Checks each provider's TEE signature against 0G's chain ourselves, without trusting the Router.
+ * The wallet is throwaway: this only reads. A signature can lag the response by a moment.
+ */
+function teeVerifier() {
+  let broker: Awaited<ReturnType<typeof createZGComputeNetworkBroker>> | undefined
+  return async (provider: string, chatId: string) => {
+    broker ??= await createZGComputeNetworkBroker(
+      new ethers.Wallet(
+        ethers.Wallet.createRandom().privateKey,
+        new ethers.JsonRpcProvider(env.zerog.rpcUrl),
+      ),
+    )
+    const { inference } = broker
+    for (let attempt = 0; ; attempt++) {
+      const ok = await inference.processResponse(provider, chatId).catch(() => null)
+      if (ok !== null || attempt === 2) return ok
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+}
+
 function llm(): LLMClient | undefined {
   if (env.zerog.apiKey) {
     return new ZeroGClient({
       apiKey: env.zerog.apiKey,
       baseUrl: env.zerog.baseUrl,
       model: env.zerog.model,
+      timeoutMs: env.zerog.timeoutMs,
+      verifyTee: teeVerifier(),
     })
   }
   if (env.isLocal) {
@@ -177,6 +207,7 @@ const ctx: AppContext = {
     },
   },
   devTools: env.isLocal,
+  livePrices: Boolean(env.localPriceFeedUrl),
   devFaucet: env.isLocal ? localFaucet() : undefined,
   readNews: newsReader(env.newsRssUrls),
   brain: {
@@ -187,12 +218,34 @@ const ctx: AppContext = {
   now: Date.now,
 }
 
+/** A database outlives anvil: refuse to run against a chain that has never seen its owners. */
+async function assertDatabaseMatchesChain() {
+  const [owner] = await ctx.db.select().from(schema.owners).limit(1)
+  if (!owner) return
+  const human = await client.readContract({
+    address: contracts.arena,
+    abi: arenaAbi,
+    functionName: 'humanOf',
+    args: [getAddress(owner.wallet)],
+  })
+  if (human === zeroHash) {
+    throw new Error('This database belongs to an older local chain. Run `pnpm dev:reset`.')
+  }
+}
+
 createApp(ctx, env.corsOrigins).listen(env.port, (error) => {
   if (error) throw error
   console.log(
     `[server] http://localhost:${env.port} · chain ${chain.id} (${chain.name}) · rpc ${rpcUrl} · db ${dbKind}`,
   )
 })
+
+if (env.isLocal) await assertDatabaseMatchesChain()
+await restoreStubPositions(ctx)
+if (env.localPriceFeedUrl && ctx.flash?.stub) {
+  await startPriceFeed(ctx.flash.stub, env.localPriceFeedUrl)
+  console.log('[server] WETH price: live, fills still simulated')
+}
 
 startPredictionIndexer(ctx)
 if (env.markets.enabled) {

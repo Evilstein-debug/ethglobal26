@@ -69,6 +69,14 @@ export function DevPriceControls() {
   const { data: health } = useHealth()
   const { busy, msg, run } = useDevCall()
   if (health?.flash !== 'local-stub') return null
+  if (health.livePrice) {
+    return (
+      <p className="border-t border-line pt-3 text-xs text-muted">
+        WETH ${health.livePrice.toFixed(2)}, live from Coinbase. Fills are simulated until Flash is
+        connected.
+      </p>
+    )
+  }
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <p className="text-xs text-muted">

@@ -1,22 +1,30 @@
 /**
- * `pnpm dev`: the whole local stack with zero external keys.
- *   1. start anvil (or reuse one on :8545)
- *   2. deploy contracts + regenerate typed ABIs/addresses, mint mock USDC to the dev wallets and
- *      fill the reward pool
+ * `pnpm dev`: the app on a local chain with real services: 0G, World ID, Neon, live prices and
+ * news from apps/server/.env. Only the chain and Flash fills are local, and both are labeled.
+ *   1. start anvil, restoring the saved chain (or reuse one on :8545)
+ *   2. on a new chain: deploy contracts + regenerate typed ABIs/addresses, mint mock USDC to the
+ *      dev wallets and fill the reward pool
  *   3. run apps/server and apps/web against chain 31337
+ * `LOCAL_STUBS=1 pnpm dev` runs with zero external keys, on labeled stubs and a throwaway chain.
+ * `pnpm dev:reset` starts the local world over.
  * For a testnet, use `pnpm dev:testnet` with each app's .env pointing at it.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import {
+  ANVIL_STATE,
   deployLocal,
   ensureAnvil,
+  isDeployed,
   localClient,
+  LOCAL_REAL_ENV,
   LOCAL_RPC_URL,
   LOCAL_SERVER_ENV,
   ROOT,
   seedLocal,
 } from './lib/local'
+
+const stubs = process.env.LOCAL_STUBS === '1'
 
 const children: ChildProcess[] = []
 
@@ -48,24 +56,30 @@ function startApp(name: string, filter: string, env: NodeJS.ProcessEnv) {
   children.push(child)
 }
 
-const anvil = await ensureAnvil()
+const anvil = await ensureAnvil(stubs ? undefined : ANVIL_STATE)
 if (anvil) children.push(anvil)
 
 try {
-  await deployLocal()
-  await seedLocal()
+  if (stubs || !(await isDeployed())) {
+    await deployLocal()
+    await seedLocal()
+  } else {
+    console.log('[dev] restored the saved chain and its contracts')
+  }
 } catch (error) {
   console.error('[dev] deploy failed:', error)
   shutdown(1)
 }
 
-// One local database per chain: keyed by the genesis block hash, which changes every time anvil
-// starts fresh, so the server never mixes rounds from an old chain with new contracts.
-const genesis = await localClient.getBlock({ blockNumber: 0n })
-const databaseUrl = resolve(ROOT, `apps/server/data/local-${genesis.hash.slice(2, 10)}`)
-console.log(`[dev] server database: ${databaseUrl}`)
-
-startApp('server', '@starter/server', { ...LOCAL_SERVER_ENV, DATABASE_URL: databaseUrl })
+if (stubs) {
+  // A throwaway chain gets a throwaway database, keyed by its genesis block hash.
+  const genesis = await localClient.getBlock({ blockNumber: 0n })
+  const databaseUrl = resolve(ROOT, `apps/server/data/local-${genesis.hash.slice(2, 10)}`)
+  console.log(`[dev] server database: ${databaseUrl}`)
+  startApp('server', '@starter/server', { ...LOCAL_SERVER_ENV, DATABASE_URL: databaseUrl })
+} else {
+  startApp('server', '@starter/server', LOCAL_REAL_ENV)
+}
 startApp('web', '@starter/web', {
   NEXT_PUBLIC_CHAIN_ID: '31337',
   NEXT_PUBLIC_RPC_URL: LOCAL_RPC_URL,

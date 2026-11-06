@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
+    "dev:reset": "tsx --env-file-if-exists=apps/server/.env scripts/dev-reset.ts",
     "dev:testnet": "pnpm --parallel --filter @starter/server --filter @starter/web dev",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present --no-bail lint && eslint scripts",
@@ -20,7 +21,7 @@
     "build:contracts": "pnpm --filter @starter/contracts build",
     "deploy:local": "pnpm --filter @starter/contracts deploy:local && pnpm codegen",
     "deploy:base": "pnpm --filter @starter/contracts deploy:base && pnpm codegen",
-    "e2e:happy": "tsx --env-file-if-exists=.env scripts/e2e-happy.ts",
+    "e2e:happy": "LOCAL_ANVIL_PORT=8546 RPC_URL=http://127.0.0.1:8546 PORT=8788 SERVER_URL=http://localhost:8788 tsx --env-file-if-exists=.env scripts/e2e-happy.ts",
     "verify": "tsx --env-file-if-exists=.env scripts/verify.ts",
     "seed:replay": "tsx --env-file-if-exists=.env scripts/seed-replay.ts"
   },
@@ -30,9 +31,11 @@
     "@starter/flash": "workspace:*",
     "@starter/shared": "workspace:*",
     "@types/node": "20.19.43",
+    "@types/pg": "8.23.1",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
     "ethers": "^6.17.0",
+    "pg": "8.23.1",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "5.9.3",

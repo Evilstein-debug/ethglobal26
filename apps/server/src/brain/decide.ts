@@ -60,7 +60,7 @@ async function record(
 async function ask(ctx: AppContext, agentId: string, kind: Kind, system: string, data: unknown) {
   if (!ctx.llm) return { ok: false as const, reason: 'llm_not_configured' }
   try {
-    const result = await ctx.llm.complete({ system, user: dataBlock(data) })
+    const result = await ctx.llm.complete({ system, user: dataBlock(data), maxTokens: 4000 })
     return { ok: true as const, result, parsed: parseModelJson(result.output) }
   } catch (err) {
     if (err instanceof ZeroGError && err.trace?.requestId) {

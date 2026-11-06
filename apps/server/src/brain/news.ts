@@ -43,7 +43,10 @@ export function parseTitles(xml: string): string[] {
 }
 
 async function readFeed(url: string) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { 'user-agent': 'AgentArena/1.0 (+RSS reader)' },
+  })
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`)
   return parseTitles(await res.text())
 }

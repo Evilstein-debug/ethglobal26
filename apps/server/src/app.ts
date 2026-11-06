@@ -29,6 +29,7 @@ export function createApp(ctx: AppContext, corsOrigins: string[] = []) {
       db,
       humanVerifier: ctx.humanVerifier.method,
       flash: ctx.flash ? ctx.flash.api.kind : 'not_configured',
+      livePrice: ctx.livePrices ? ctx.flash?.stub?.priceUsd : undefined,
       manualTrades: ctx.allowManualTrades,
       llm: ctx.llm ? { kind: ctx.llm.kind, model: ctx.llm.model } : 'not_configured',
       contracts: ctx.contracts,
