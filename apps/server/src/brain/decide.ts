@@ -12,6 +12,7 @@ import { predictionSchema } from '@starter/shared/schemas'
 import { and, eq, sql } from 'drizzle-orm'
 import { encodeFunctionData, formatEther, formatUnits, getAddress, zeroHash, type Hash } from 'viem'
 import type { AppContext } from '../context'
+import { wethInfo } from '../execution/weth'
 import { queryRows, schema } from '../db'
 import { executeTrade, newIntentId, type TradeResult } from '../execution/trade'
 import { authorizePrediction, authorizeTrade } from '../policy/authorize'
@@ -250,10 +251,11 @@ export async function think(
     0,
     Math.min(policy.perTradeCap, policy.dailyCap - Number(spent?.total ?? 0), Number(usdc)),
   )
-  const asset = trader && ctx.flash ? await ctx.flash.api.search('WETH', ctx.flash.chain, 1) : []
-  const livePrice = Number(asset[0]?.price)
+  // Flash price when it answers, Coinbase spot otherwise (execution/weth.ts). No price → no trade.
+  const weth = trader && ctx.flash ? await wethInfo(ctx.flash).catch(() => null) : null
+  const livePrice = Number(weth?.price)
   // The risk flag is checked again by code at execution; asking here saves a pointless model call.
-  const flagged = Boolean(asset[0]?.riskFlagged)
+  const flagged = weth?.riskFlagged === true
   const canTrade = Boolean(gate?.ok) && maxSize >= b.minTrade && livePrice > 0 && !flagged
 
   const [made] = await queryRows<{ n: string }>(

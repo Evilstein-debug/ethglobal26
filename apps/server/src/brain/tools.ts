@@ -6,6 +6,7 @@
  */
 import { z } from 'zod'
 import type { AppContext } from '../context'
+import { wethInfo } from '../execution/weth'
 import { summarizeCandles } from './candles'
 import { recentMemory } from './memory'
 
@@ -46,13 +47,17 @@ async function run(ctx: AppContext, agentId: string, name: ToolName, args: z.inf
   switch (name) {
     case 'get_market': {
       if (!ctx.flash) return { available: false, reason: 'no market source on this server' }
-      const [asset] = await ctx.flash.api.search('WETH', ctx.flash.chain, 1)
-      if (!asset) return { available: false, reason: 'WETH not found' }
+      const weth = await wethInfo(ctx.flash).catch(() => null)
+      if (!weth) return { available: false, reason: 'no WETH price right now' }
       return {
         asset: 'WETH',
-        priceUsd: Number(asset.price),
-        source: ctx.flash.stub ? 'local stub price' : 'Flash /search',
-        stats24h: statsOf(asset),
+        priceUsd: weth.price,
+        source: ctx.flash.stub
+          ? 'local stub price'
+          : weth.source === 'flash'
+            ? 'Flash /search'
+            : 'Coinbase ETH-USD spot',
+        stats24h: statsOf(weth.asset),
       }
     }
     case 'get_candles': {

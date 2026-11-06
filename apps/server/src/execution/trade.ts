@@ -25,6 +25,7 @@ import { USDC_DECIMALS } from '@starter/shared/tokens'
 import { and, eq, inArray, lte } from 'drizzle-orm'
 import { encodeFunctionData, getAddress, isHex, parseUnits, type Hash, type Hex } from 'viem'
 import type { AppContext, FlashSetup } from '../context'
+import { riskGuard, wethInfo } from './weth'
 import { schema } from '../db'
 import {
   authorizeTrade,
@@ -148,16 +149,12 @@ export async function waitForFirstFill(flash: FlashSetup, orderId: string, funde
 
 /**
  * The risk guard. Code, not the model, refuses an asset Flash flags as risky before anything is
- * reserved, committed or signed. A failing lookup also refuses: no answer is not a yes.
+ * reserved, committed or signed. A failing lookup also refuses: no answer is not a yes. The one
+ * exception (canonical Base WETH while Flash rations /search) is in riskGuard.
  */
-async function assetGuard(flash: FlashSetup) {
-  try {
-    const [asset] = await flash.api.search('WETH', flash.chain, 1)
-    if (!asset) return 'asset_check_failed' as const
-    return asset.riskFlagged ? ('asset_risk_flagged' as const) : null
-  } catch {
-    return 'asset_check_failed' as const
-  }
+async function assetGuard(flash: FlashSetup, wethAddress: string) {
+  const info = await wethInfo(flash).catch(() => null)
+  return riskGuard(info, flash, wethAddress)
 }
 
 export async function sendAndWait(
@@ -213,7 +210,7 @@ export async function executeTrade(
   const intent: TradeIntent = tradeIntentSchema.parse(rawIntent)
   const flash = ctx.flash
   if (!flash) return { status: 'denied', reason: 'flash_not_configured' }
-  const blocked = await assetGuard(flash)
+  const blocked = await assetGuard(flash, ctx.contracts.weth ?? '')
   if (blocked) return { status: 'denied', reason: blocked }
 
   const [agentRow] = await ctx.db

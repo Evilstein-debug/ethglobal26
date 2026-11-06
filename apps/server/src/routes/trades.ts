@@ -4,6 +4,7 @@ import { getAddress, isAddress } from 'viem'
 import { z } from 'zod'
 import { ownerAuth, walletOf } from '../auth/owner-auth'
 import { DEV_FAUCET, type AppContext } from '../context'
+import { wethInfo } from '../execution/weth'
 import { schema } from '../db'
 import { closePosition } from '../execution/close'
 import { executeTrade, newIntentId } from '../execution/trade'
@@ -54,9 +55,9 @@ export function tradesRouter(ctx: AppContext) {
       const body = manualBody.parse(req.body)
       let entryRefPrice = body.entryRefPrice
       if (!entryRefPrice) {
-        const [asset] = (await ctx.flash?.api.search('WETH', ctx.flash.chain, 1)) ?? []
-        if (!asset) throw new HttpError(503, 'price_unavailable')
-        entryRefPrice = Number(asset.price).toFixed(2)
+        const weth = ctx.flash ? await wethInfo(ctx.flash).catch(() => null) : null
+        if (!weth) throw new HttpError(503, 'price_unavailable')
+        entryRefPrice = weth.price.toFixed(2)
       }
       const result = await executeTrade(ctx, {
         version: 1,

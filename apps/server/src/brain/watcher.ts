@@ -7,6 +7,7 @@
  */
 import { eq, inArray, and } from 'drizzle-orm'
 import type { AppContext } from '../context'
+import { wethInfo } from '../execution/weth'
 import { schema } from '../db'
 import { logActivity, wakeAgent } from '../services/activity'
 
@@ -38,8 +39,8 @@ export function startPriceWatcher(ctx: AppContext, opts: WatchOpts & { pollMs: n
     if (running) return
     running = true
     try {
-      const [asset] = await flash.api.search('WETH', flash.chain, 1)
-      const move = checkMove(state, Number(asset?.price), ctx.now(), opts)
+      const { price } = await wethInfo(flash)
+      const move = checkMove(state, price, ctx.now(), opts)
       if (!move) return
       const traders = await ctx.db
         .select({ id: schema.agents.id })
