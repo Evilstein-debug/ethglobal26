@@ -13,7 +13,7 @@ import { createAgent, setPaused, updatePolicy } from '../services/agents'
 import { skipReason, startAnvilWorld } from '../test/anvil'
 import { startPredictionIndexer } from './indexer'
 import { brier } from './resolver'
-import { tick, type MarketConfig } from './scheduler'
+import { startScheduler, tick, type MarketConfig } from './scheduler'
 
 test('brier score', () => {
   assert.equal(brier(10_000, 'YES'), 0)
@@ -386,6 +386,34 @@ describe('per-trade markets on anvil', { skip: skipReason }, () => {
     assert.equal((await market(w)).phase, 'SETTLED')
     const [settled] = await w.db.select().from(schema.rewardEpochs).orderBy(schema.rewardEpochs.id)
     assert.equal(settled!.status, 'published')
+  })
+
+  test('left alone, the two loops run a whole trade with nobody ticking them', async () => {
+    const w = await arena()
+    w.ctx.now = () => Date.now()
+    const live = { ...cfg, predictionWindowMs: 60_000, maxHoldMs: 120_000 }
+    const stop = startScheduler(w.ctx, live, 50)
+    after(stop)
+    const until = async (what: string, ok: () => Promise<boolean>) => {
+      for (let i = 0; !(await ok()); i++) {
+        assert.ok(i < 600, `timed out waiting for: ${what}`)
+        await new Promise((r) => setTimeout(r, 50))
+      }
+    }
+    await until('Beta predicts on the broadcast', async () => {
+      return (await w.db.select().from(schema.predictions)).length === 1
+    })
+    w.stub.setPrice(3100)
+    await until('the market settles', async () => {
+      const [m] = await w.db.select().from(schema.rounds)
+      return m?.phase === 'SETTLED'
+    })
+    stop()
+    await new Promise((r) => setTimeout(r, 200)) // let any tick in flight finish
+    assert.equal((await w.db.select().from(schema.rounds)).length, 1)
+    assert.equal((await w.db.select().from(schema.roundEntries)).length, 1, 'opened exactly once')
+    assert.equal((await entry(w)).outcome, 'YES')
+    await verifiedOk(w, (await entry(w)).id)
   })
 
   test('verifyEntry: an honest entry passes; each tampered claim fails its step', async () => {
