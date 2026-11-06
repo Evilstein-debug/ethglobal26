@@ -11,6 +11,7 @@ import { targetChain } from '@/lib/env'
 
 const NAV = [
   ['/', 'Arena'],
+  ['/live', 'Live'],
   ['/leaderboard', 'Leaderboards'],
   ['/rewards', 'Rewards'],
   ['/agents', 'My agents'],
