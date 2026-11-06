@@ -13,7 +13,7 @@ import { useTx } from '@/lib/use-tx'
 type Entry = {
   id: number
   onchainEntryId: number | null
-  trader: { id: string; name: string; address: string }
+  trader: { id: string; name: string; address: string; owner: string }
   outcome: 'PENDING' | 'YES' | 'NO' | 'VOID'
   pnlBps: number | null
   voidReason: string | null
@@ -160,9 +160,17 @@ export function App() {
                     ` · avg P(YES) ${(e.predictions.avgProbYesBps / 100).toFixed(0)}%`}
                   {e.tradeBudgetUsdc != null && ` · budget ${e.tradeBudgetUsdc} USDC`}
                 </p>
-                {round.phase === 'PREDICTING' && owner?.verified && health && (
-                  <ManualPick entry={e} arena={health.contracts.arena} />
-                )}
+                {round.phase === 'PREDICTING' &&
+                  owner?.verified &&
+                  health &&
+                  (address?.toLowerCase() === e.trader.owner.toLowerCase() ? (
+                    <p className="text-xs text-muted">
+                      Your agent: you can&apos;t predict on it. Switch to another verified wallet to
+                      pick.
+                    </p>
+                  ) : (
+                    <ManualPick entry={e} arena={health.contracts.arena} />
+                  ))}
                 <Link href={`/entries/${e.id}`} className="text-xs underline">
                   Verify this entry →
                 </Link>

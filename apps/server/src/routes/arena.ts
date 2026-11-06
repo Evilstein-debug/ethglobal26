@@ -18,6 +18,7 @@ export function arenaRouter(ctx: AppContext) {
       trader_agent_id: string
       trader_name: string
       trader_address: string
+      trader_owner: string
       outcome: string
       pnl_bps: number | null
       void_reason: string | null
@@ -29,7 +30,7 @@ export function arenaRouter(ctx: AppContext) {
       avg_prob: string | null
     }>(
       ctx.db,
-      sql`select e.id, e.onchain_entry_id, e.trader_agent_id, a.name as trader_name, a.address as trader_address,
+      sql`select e.id, e.onchain_entry_id, e.trader_agent_id, a.name as trader_name, a.address as trader_address, a.owner_wallet as trader_owner,
                  e.outcome, e.pnl_bps, e.void_reason, e.trade_budget, e.open_tx, e.resolve_tx,
                  count(p.prediction_id) filter (where p.side = 'YES') as yes,
                  count(p.prediction_id) filter (where p.side = 'NO') as no,
@@ -38,13 +39,18 @@ export function arenaRouter(ctx: AppContext) {
           join agents a on a.id = e.trader_agent_id
           left join predictions p on p.entry_id = e.id
           where e.round_id = ${roundId}
-          group by e.id, a.name, a.address
+          group by e.id, a.name, a.address, a.owner_wallet
           order by e.id`,
     )
     return rows.map((e) => ({
       id: e.id,
       onchainEntryId: e.onchain_entry_id,
-      trader: { id: e.trader_agent_id, name: e.trader_name, address: getAddress(e.trader_address) },
+      trader: {
+        id: e.trader_agent_id,
+        name: e.trader_name,
+        address: getAddress(e.trader_address),
+        owner: getAddress(e.trader_owner),
+      },
       outcome: e.outcome,
       pnlBps: e.pnl_bps,
       voidReason: e.void_reason,
