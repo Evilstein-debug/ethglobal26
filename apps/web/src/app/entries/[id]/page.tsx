@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation'
 import type { PublicClient } from 'viem'
 import { usePublicClient } from 'wagmi'
 import { ModelBadge, TxLink } from '@/components/links'
-import { Badge, Empty, Panel, short } from '@/components/ui'
+import { Badge, Empty, Eyebrow, Panel, short } from '@/components/ui'
 import { errorText, useApi } from '@/lib/api'
 import { targetChain } from '@/lib/env'
 
@@ -70,16 +70,16 @@ function FlashReceipt({ receipt }: { receipt: Receipt | undefined }) {
     return <p className="text-xs text-muted">Flash receipt unavailable: {receipt.reason}</p>
   const row = (label: string, p: PnL | null) =>
     p ? (
-      <tr className="border-t border-line">
-        <td className="py-1 pr-4">{label}</td>
+      <tr className="border-t border-hairline">
+        <td className="py-2 pr-4">{label}</td>
         <td className="pr-4 font-mono">{usdc(p.spent)}</td>
         <td className="pr-4 font-mono">{usdc(p.received)}</td>
         <td className="font-mono">{usdc(p.pnl)}</td>
       </tr>
     ) : null
   return (
-    <div className="flex flex-col gap-2 rounded border border-line p-2">
-      <p className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+    <div className="flex flex-col gap-3 rounded-lg border border-hairline bg-surface p-4">
+      <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
         Flash receipt
         {receipt.source === 'local-stub' && <Badge>local stub, not Flash</Badge>}
         {receipt.matches === true && <Badge tone="ok">matches our PnL</Badge>}
@@ -177,23 +177,31 @@ function Checklist({ bundle }: { bundle: Bundle }) {
   })
   return (
     <Panel title="Verification">
-      <p className="text-xs text-muted">
+      <p className="text-sm leading-relaxed text-mute">
         Checked live in your browser against {targetChain.name}: logs, receipts and contract state,
         with hashes and PnL recomputed here. A dash means the step can&apos;t run yet or has nothing
         real to check. Re-run it yourself with{' '}
-        <code className="font-mono">pnpm verify {bundle.entry.id}</code>.
+        <code className="rounded bg-chip px-1.5 py-0.5 font-mono text-[13px] text-ink">
+          pnpm verify {bundle.entry.id}
+        </code>
+        .
       </p>
       {error ? <p className="text-sm text-bad">Could not run checks: {errorText(error)}</p> : null}
       {!data ? (
         <Empty>{isFetching ? 'Checking…' : 'Waiting for a chain connection…'}</Empty>
       ) : (
-        <ul className="flex flex-col gap-2 text-sm">
+        <ul className="flex flex-col text-sm">
           {data.steps.map((s) => (
-            <li key={s.id} className="flex gap-2">
-              <span className={`font-mono ${MARK[s.status].color}`}>{MARK[s.status].icon}</span>
+            <li
+              key={s.id}
+              className="flex gap-3 border-t border-hairline py-3 first:border-0 first:pt-0"
+            >
+              <span className={`w-4 flex-none font-mono font-semibold ${MARK[s.status].color}`}>
+                {MARK[s.status].icon}
+              </span>
               <span className="min-w-0">
                 {s.label}
-                <span className="block break-words text-xs text-muted">{s.detail}</span>
+                <span className="mt-0.5 block text-xs break-words text-mute">{s.detail}</span>
               </span>
             </li>
           ))}
@@ -212,17 +220,20 @@ export default function EntryPage() {
   const decisionOf = (decisionId: string | null) => decisions.find((d) => d.id === decisionId)
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-3 border-b border-hairline pb-8">
+        <Eyebrow>Entry #{entry.onchainEntryId ?? entry.id}</Eyebrow>
+        <h1 className="font-display text-[40px] leading-[1.1] tracking-[-1px] text-ink md:text-[52px]">
           Will{' '}
-          <Link href={`/agents/${trader.id}`} className="underline">
+          <Link
+            href={`/agents/${trader.id}`}
+            className="underline decoration-hairline-strong underline-offset-[6px] hover:decoration-ink"
+          >
             {trader.name}
           </Link>
           &apos;s trade make money?
         </h1>
-        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
-          Entry #{entry.onchainEntryId ?? entry.id}
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-mute">
           <Badge tone={entry.outcome === 'YES' ? 'ok' : entry.outcome === 'NO' ? 'bad' : 'muted'}>
             {entry.outcome.toLowerCase()}
             {entry.outcome === 'YES' || entry.outcome === 'NO' ? ` · ${pct(entry.pnlBps)}` : ''}
@@ -248,7 +259,7 @@ export default function EntryPage() {
             {intents.map((i) => (
               <div
                 key={i.intentId}
-                className="flex flex-col gap-1 border-t border-line pt-2 text-sm"
+                className="flex flex-col gap-2 border-t border-hairline pt-3 text-sm first:border-0 first:pt-0"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={i.state === 'FAILED' ? 'bad' : 'muted'}>{i.state}</Badge>
@@ -259,7 +270,7 @@ export default function EntryPage() {
                 </div>
                 {i.failReason && <p className="break-words text-xs text-bad">{i.failReason}</p>}
                 <EntryNotes i={i as typeof i & TradeExtras} entryRef={i.entryRefPrice} />
-                <p className="flex flex-wrap gap-x-4 font-mono text-xs text-muted">
+                <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-mute">
                   <span>spent {usdc(i.usdcSpent)}</span>
                   <span>received {usdc(i.usdcReceived)}</span>
                   <span>
@@ -288,22 +299,22 @@ export default function EntryPage() {
         {predictions.length ? (
           <div className="overflow-x-auto">
             <table className="w-full whitespace-nowrap text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
-              <thead className="text-xs text-muted">
+              <thead className="[&_th]:pb-3 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:tracking-[1px] [&_th]:text-mute [&_th]:uppercase">
                 <tr>
-                  <th className="py-1 font-normal">Predictor</th>
-                  <th className="font-normal">Call</th>
-                  <th className="font-normal">P(YES)</th>
-                  <th className="font-normal">Brier</th>
-                  <th className="font-normal">Model</th>
-                  <th className="font-normal">Tx</th>
+                  <th>Predictor</th>
+                  <th>Call</th>
+                  <th>P(YES)</th>
+                  <th>Brier</th>
+                  <th>Model</th>
+                  <th>Tx</th>
                 </tr>
               </thead>
               <tbody>
                 {predictions.map((p) => {
                   const d = decisionOf(p.decisionId)
                   return (
-                    <tr key={p.predictionId} className="border-t border-line">
-                      <td className="py-1.5">
+                    <tr key={p.predictionId} className="border-t border-hairline">
+                      <td className="py-3">
                         <span className="font-mono text-xs">{short(p.predictorAddress)}</span>
                       </td>
                       <td>{p.side}</td>
@@ -326,7 +337,7 @@ export default function EntryPage() {
 
       <Panel title="0G decisions">
         {decisions.length ? (
-          <ul className="flex flex-col gap-2 text-sm">
+          <ul className="flex flex-col gap-3 text-sm">
             {decisions.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center gap-2">
                 <Badge>{d.kind}</Badge>
@@ -334,7 +345,7 @@ export default function EntryPage() {
                 <Badge tone={d.accepted ? 'ok' : 'bad'}>
                   {d.accepted ? 'accepted' : (d.rejectReason ?? 'rejected')}
                 </Badge>
-                <span className="break-all font-mono text-xs text-muted">{d.requestId}</span>
+                <span className="font-mono text-xs break-all text-mute">{d.requestId}</span>
               </li>
             ))}
           </ul>

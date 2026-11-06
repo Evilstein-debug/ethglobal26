@@ -7,11 +7,11 @@ import { zeroHash } from 'viem'
 import { useAccount } from 'wagmi'
 import { DevPriceControls } from '@/components/dev-tools'
 import { TxStatus } from '@/components/tx-status'
-import { Badge, Button, Empty, Panel } from '@/components/ui'
+import { Badge, Button, Empty, Eyebrow, PageHeader, Panel } from '@/components/ui'
 import { useApi, useHealth } from '@/lib/api'
 import { useTx } from '@/lib/use-tx'
 
-type Entry = {
+export type Entry = {
   id: number
   onchainEntryId: number | null
   trader: { id: string; name: string; address: string; owner: string }
@@ -21,7 +21,7 @@ type Entry = {
   tradeBudgetUsdc: number | null
   predictions: { yes: number; no: number; avgProbYesBps: number | null }
 }
-type Market = {
+export type Market = {
   id: number
   phase: 'OPENING' | 'PREDICTING' | 'TRADING' | 'RESOLVING' | 'SETTLED'
   predictionsCloseAt: number
@@ -37,7 +37,7 @@ type Market = {
   }
   entries: Entry[]
 }
-type Markets = { serverTime: number; open: Market[]; recent: Market[] }
+export type Markets = { serverTime: number; open: Market[]; recent: Market[] }
 
 function Countdown({ endsAt, serverTime }: { endsAt: number; serverTime: number }) {
   const [now, setNow] = useState(() => Date.now())
@@ -79,7 +79,7 @@ function ManualPick({ entry, arena }: { entry: Entry; arena: `0x${string}` }) {
   }
   return (
     <div className="flex flex-col gap-2">
-      <label className="flex items-center gap-2 text-xs text-muted">
+      <label className="flex items-center gap-3 text-xs font-medium text-body">
         P(YES)
         <input
           type="range"
@@ -87,6 +87,7 @@ function ManualPick({ entry, arena }: { entry: Entry; arena: `0x${string}` }) {
           max={100}
           value={prob}
           onChange={(e) => setProb(Number(e.target.value))}
+          className="accent-ink"
         />
         <span className="w-8 font-mono">{prob}%</span>
       </label>
@@ -125,18 +126,18 @@ function MarketCard({
     <Panel title={`Market #${market.id}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="font-semibold">
+          <p className="font-display text-[26px] leading-[1.15] text-ink">
             Will{' '}
             <Link
               href={`/agents/${e.trader.id}`}
-              className="underline underline-offset-4 hover:no-underline"
+              className="underline decoration-hairline-strong underline-offset-4 hover:decoration-ink"
             >
               {e.trader.name}
             </Link>
             &apos;s trade make money?
           </p>
           {t && (
-            <p className="text-xs text-muted">
+            <p className="mt-1 font-mono text-xs text-mute">
               Bought {t.sizeUsdc} USDC of {t.asset} at ${t.entryPrice} · target ${t.targetPrice} ·
               stop ${t.stopPrice}
             </p>
@@ -144,7 +145,11 @@ function MarketCard({
         </div>
         <OutcomeBadge e={e} />
       </div>
-      {t?.rationale && <p className="text-xs text-muted">Its reasoning: “{t.rationale}”</p>}
+      {t?.rationale && (
+        <p className="border-l-2 border-hairline-strong pl-3 text-sm leading-relaxed text-body">
+          “{t.rationale}”
+        </p>
+      )}
       {predicting && (
         <p className="text-sm">
           Predictions close in{' '}
@@ -160,7 +165,10 @@ function MarketCard({
           <Countdown endsAt={market.closesAt} serverTime={serverTime} />
         </p>
       )}
-      <div className="flex h-2 w-full bg-line" aria-label="prediction split">
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-chip"
+        aria-label="prediction split"
+      >
         <div
           className="bg-ok"
           style={{ width: total ? `${(e.predictions.yes / total) * 100}%` : '0%' }}
@@ -185,7 +193,10 @@ function MarketCard({
         ) : (
           <ManualPick entry={e} arena={arena} />
         ))}
-      <Link href={`/entries/${e.id}`} className="text-xs underline">
+      <Link
+        href={`/entries/${e.id}`}
+        className="text-sm font-medium text-ink underline decoration-hairline-strong underline-offset-4 hover:decoration-ink"
+      >
         Verify this entry →
       </Link>
     </Panel>
@@ -212,37 +223,33 @@ export function App() {
   )
 
   return (
-    <div className="flex flex-col gap-6">
-      <Panel title="How it works">
-        <p className="text-sm text-muted">
+    <div className="flex flex-col gap-10">
+      <PageHeader eyebrow="Arena" title="Every trade is a market.">
+        <p>
           Agents decide for themselves when to trade. Every filled trade appears here at once as a
           public question: will it make money? Other agents and owners call YES or NO for free until
           predictions close, then the result comes from the real fills. Watch them think on the{' '}
-          <Link href="/live" className="underline">
+          <Link href="/live" className="font-medium text-ink underline underline-offset-4">
             Live
           </Link>{' '}
-          tab.
+          page.
         </p>
-        <DevPriceControls />
-      </Panel>
+      </PageHeader>
+      <DevPriceControls />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs text-muted uppercase tracking-widest">Open markets</h2>
+      <section className="flex flex-col gap-4">
+        <Eyebrow>Open markets</Eyebrow>
         {data.open.length ? (
-          <div className="grid gap-px border border-line bg-line md:grid-cols-2">
-            {data.open.map(card)}
-          </div>
+          <div className="grid gap-4 md:grid-cols-2">{data.open.map(card)}</div>
         ) : (
           <Empty>No open markets. One appears the moment an agent trades.</Empty>
         )}
       </section>
 
       {data.recent.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs text-muted uppercase tracking-widest">Finished</h2>
-          <div className="grid gap-px border border-line bg-line md:grid-cols-2">
-            {data.recent.map(card)}
-          </div>
+        <section className="flex flex-col gap-4">
+          <Eyebrow>Finished</Eyebrow>
+          <div className="grid gap-4 md:grid-cols-2">{data.recent.map(card)}</div>
         </section>
       )}
     </div>

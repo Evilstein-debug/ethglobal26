@@ -10,7 +10,7 @@ const LOCAL_CHAIN_ID = 31337
 function DevButton(props: { busy: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
-      className="border border-fg px-2 py-1 font-mono text-xs hover:bg-fg hover:text-bg disabled:opacity-40"
+      className="rounded-lg border border-hairline-strong bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-elevated disabled:opacity-40"
       disabled={props.busy}
       onClick={props.onClick}
     >
@@ -73,14 +73,14 @@ export function DevPriceControls() {
   if (health?.flash !== 'local-stub') return null
   if (health.livePrice) {
     return (
-      <p className="border-t border-line pt-3 text-xs text-muted">
+      <p className="rounded-lg border border-hairline bg-surface px-4 py-3 text-xs text-mute">
         WETH ${health.livePrice.toFixed(2)}, live from Coinbase. Fills are simulated until Flash is
         connected.
       </p>
     )
   }
   return (
-    <div className="flex flex-col gap-2 border-t border-line pt-3">
+    <div className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface px-4 py-3">
       <p className="text-xs text-muted">
         Fake market (local only). After an agent buys, click price up or down to hit its target or
         stop. Leave it alone and it sells at its time limit. Reset before the next trade.

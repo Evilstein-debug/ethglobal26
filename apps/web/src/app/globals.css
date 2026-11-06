@@ -1,15 +1,54 @@
 @import 'tailwindcss';
 
-/* Minimal, square, monochrome, light. Tweak these tokens to restyle the whole app. */
+/* Raycast colour scheme in light mode (apps/web/DESIGN.md overrides): a white surface ladder,
+   hairline borders, a near-black primary action, and saturated accents used sparingly. */
 @theme {
-  --color-bg: #fafafa;
-  --color-fg: #0a0a0a;
-  --color-muted: #737373;
-  --color-line: #e5e5e5;
-  --color-ok: #15803d;
-  --color-bad: #b91c1c;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  /* App tokens used by every page. */
+  --color-bg: #ffffff;
+  --color-fg: #111214;
+  --color-muted: #6a6b6c;
+  --color-line: #e6e6e8;
+  --color-ok: #1a9e63;
+  --color-bad: #e5484d;
+
+  /* Surface ladder. */
+  --color-canvas: #ffffff;
+  --color-surface: #fafafa;
+  --color-elevated: #f5f5f6;
+  --color-card: #ffffff;
+  --color-chip: #f0f0f1;
+
+  /* Text. */
+  --color-ink: #111214;
+  --color-body: #3d3e40;
+  --color-charcoal: #2c2d2f;
+  --color-mute: #6a6b6c;
+  --color-ash: #9c9c9d;
+
+  /* Lines and the primary action (Raycast's white pill, inverted for light mode). */
+  --color-hairline: #e6e6e8;
+  --color-hairline-strong: rgba(0, 0, 0, 0.14);
+  --color-primary: #111214;
+  --color-primary-pressed: #2c2d2f;
+  --color-on-primary: #ffffff;
+
+  /* Accents: status and illustration only, never chrome. Darkened for contrast on white. */
+  --color-accent-blue: #0b7bc4;
+  --color-accent-red: #e5484d;
+  --color-accent-green: #1a9e63;
+  --color-accent-yellow: #c78a00;
+  --color-stripe-start: #ff5757;
+  --color-stripe-end: #a1131a;
+
+  --shadow-card: rgba(0, 0, 0, 0.04) 0px 4px 12px 0px;
+  --shadow-mockup: rgba(0, 0, 0, 0.08) 0px 12px 24px -4px;
+  --shadow-float: rgba(0, 0, 0, 0.12) 0px 24px 64px -12px;
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-display: var(--font-editorial), 'Times New Roman', Georgia, serif;
 }
 
 html {
@@ -20,4 +59,18 @@ body {
   background: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
+}
+
+/* Closing line above the footer: a hairline that fades out at both ends. The red stripe gradient
+   is used once per page, in the hero. */
+.glow-stripe {
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.12) 50%, transparent);
+}
+
+/* Hero accent text: the stripe gradient clipped to type. */
+.stripe-text {
+  background: linear-gradient(100deg, var(--color-stripe-start), var(--color-stripe-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

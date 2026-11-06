@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useState } from 'react'
 import { useAccount } from 'wagmi'
-import { Button, Empty, Field, Panel } from '@/components/ui'
+import { Button, Empty, Field, Notice, PageHeader, Panel } from '@/components/ui'
 import { api, ApiError, errorText, useApi, useOwnerAuth } from '@/lib/api'
 
 type WorldConfig = {
@@ -36,7 +36,7 @@ function StatusLine({ status }: { status: Status }) {
       return (
         <p className="text-sm text-ok">
           ✓ Verified. You&apos;re registered onchain as a unique human.{' '}
-          <Link className="underline" href="/agents">
+          <Link className="font-medium underline underline-offset-4" href="/agents">
             Create an agent →
           </Link>
         </p>
@@ -60,6 +60,19 @@ function StatusLine({ status }: { status: Status }) {
 }
 
 export default function Onboard() {
+  return (
+    <div className="flex flex-col gap-8">
+      <PageHeader eyebrow="Verify" title="One human, one account.">
+        <p>{WHY}</p>
+      </PageHeader>
+      <div className="max-w-[560px]">
+        <VerifyPanel />
+      </div>
+    </div>
+  )
+}
+
+function VerifyPanel() {
   const { address } = useAccount()
   const getAuth = useOwnerAuth()
   const queryClient = useQueryClient()
@@ -115,7 +128,7 @@ export default function Onboard() {
     return (
       <Panel title="Verified">
         <p className="text-sm text-ok">✓ This wallet belongs to a verified unique human.</p>
-        <Link href="/agents" className="text-sm underline">
+        <Link href="/agents" className="text-sm font-medium text-ink underline underline-offset-4">
           Go to your agents →
         </Link>
       </Panel>
@@ -124,11 +137,13 @@ export default function Onboard() {
   if (!config) return <Empty>Loading…</Empty>
 
   return (
-    <Panel title="Verify you're a unique human">
-      <p className="text-sm text-muted">{WHY}</p>
+    <Panel title="Proof of Human with World ID">
+      <p className="text-sm leading-relaxed text-body">
+        You verify once. We store a one-way nullifier hash, never who you are.
+      </p>
       {config.method === 'world' ? (
         <>
-          <Button onClick={startWorld} disabled={status.kind === 'working'}>
+          <Button onClick={startWorld} className="self-start" disabled={status.kind === 'working'}>
             Verify with World ID
           </Button>
           {rpContext && config.app_id && config.action && (
@@ -161,11 +176,11 @@ export default function Onboard() {
             submitProof({ devHuman }).catch(() => undefined)
           }}
         >
-          <p className="border border-bad p-2 text-xs text-bad">
+          <Notice tone="bad">
             LOCAL ANVIL ONLY: the server uses a dev identity check instead of World ID. Any name is
             accepted; the same name twice is &quot;the same human&quot;. Type “cancel” to see the
             cancelled path.
-          </p>
+          </Notice>
           <Field
             label="Dev identity"
             value={devHuman}
@@ -173,7 +188,7 @@ export default function Onboard() {
             placeholder="e.g. bob"
             required
           />
-          <Button type="submit" disabled={status.kind === 'working'}>
+          <Button type="submit" className="self-start" disabled={status.kind === 'working'}>
             Verify (dev)
           </Button>
         </form>

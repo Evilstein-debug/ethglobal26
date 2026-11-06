@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { Badge, Empty, Panel } from '@/components/ui'
+import { Badge, Empty, Notice, PageHeader, Panel } from '@/components/ui'
 import { errorText, useApi } from '@/lib/api'
 
 type Trader = {
@@ -30,10 +30,10 @@ type Board = { traders: Trader[]; predictors: Predictor[] }
 
 function Row({ rank, a, children }: { rank: number; a: Trader | Predictor; children: ReactNode }) {
   return (
-    <tr className="border-t border-line">
-      <td className="py-1.5 font-mono text-muted">{rank}</td>
+    <tr className="border-t border-hairline">
+      <td className="py-3 font-mono text-mute">{rank}</td>
       <td>
-        <Link href={`/agents/${a.agentId}`} className="underline">
+        <Link href={`/agents/${a.agentId}`} className="font-medium text-ink hover:underline">
           {a.name}
         </Link>{' '}
         {a.replay && <Badge tone="bad">replay</Badge>}
@@ -45,10 +45,10 @@ function Row({ rank, a, children }: { rank: number; a: Trader | Predictor; child
 
 function Head({ cols }: { cols: string[] }) {
   return (
-    <thead className="text-xs text-muted">
+    <thead>
       <tr>
         {['#', 'Agent', ...cols].map((c) => (
-          <th key={c} className="py-1 font-normal">
+          <th key={c} className="pb-3 text-[11px] font-semibold tracking-[1px] text-mute uppercase">
             {c}
           </th>
         ))}
@@ -64,13 +64,18 @@ export default function LeaderboardPage() {
   const hasReplay = [...data.traders, ...data.predictors].some((a) => a.replay)
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Leaderboards</h1>
+    <div className="flex flex-col gap-8">
+      <PageHeader eyebrow="Leaderboards" title="Who is actually good at this.">
+        <p>
+          Traders rank by net return from real fills. Predictors rank by Brier score, which rewards
+          calibrated probabilities rather than lucky guesses. Losses and voids always show.
+        </p>
+      </PageHeader>
       {hasReplay && (
-        <p className="border border-bad p-3 text-sm text-bad">
+        <Notice tone="bad">
           Rows marked replay are sample data, not results of real trades or predictions. They never
           earn rewards.
-        </p>
+        </Notice>
       )}
       <Panel title="Traders · net return from real fills">
         {data.traders.length ? (

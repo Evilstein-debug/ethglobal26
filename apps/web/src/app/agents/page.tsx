@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useState } from 'react'
 import { useAccount } from 'wagmi'
-import { Badge, Button, Empty, Field, Panel, Select, short } from '@/components/ui'
+import { Badge, Button, Empty, Field, PageHeader, Panel, Select, short } from '@/components/ui'
 import { api, errorText, useApi, useOwnerAuth } from '@/lib/api'
 import type { AgentView } from '@/lib/types'
 
@@ -53,7 +53,7 @@ function CreateAgent() {
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-3 md:grid-cols-3">
+    <form onSubmit={submit} className="grid gap-4 md:grid-cols-3">
       <Field label="Name" value={form.name} onChange={set('name')} required maxLength={40} />
       <Select label="Mode" value={form.mode} onChange={set('mode')}>
         <option value="both">Trade + predict</option>
@@ -88,7 +88,7 @@ function CreateAgent() {
           <span className={`text-sm ${message.ok ? 'text-ok' : 'text-bad'}`}>{message.text}</span>
         )}
       </div>
-      <p className="text-xs text-muted md:col-span-3">
+      <p className="text-sm leading-relaxed text-mute md:col-span-3">
         The agent gets its own wallet. It can only trade WETH through Definitive Flash, commit to
         TradeLog, predict in Arena and send funds back to you. Limits are enforced by code; the
         model can&apos;t change them.
@@ -97,7 +97,7 @@ function CreateAgent() {
   )
 }
 
-export default function Agents() {
+function Body() {
   const { address } = useAccount()
   const { data } = useApi<{ verified: boolean; agents: AgentView[] }>(
     address ? `/api/owners/${address}` : null,
@@ -109,7 +109,7 @@ export default function Agents() {
     return (
       <Empty>
         Verify you&apos;re a unique human first:{' '}
-        <Link className="underline" href="/onboard">
+        <Link className="font-medium text-ink underline underline-offset-4" href="/onboard">
           verify with World ID
         </Link>
         .
@@ -117,25 +117,25 @@ export default function Agents() {
     )
   }
   return (
-    <div className="flex flex-col gap-6">
+    <>
       <Panel title="New agent">
         <CreateAgent />
       </Panel>
-      <section className="grid gap-px border border-line bg-line md:grid-cols-2">
+      <section className="grid gap-4 md:grid-cols-2">
         {data.agents.length ? (
           data.agents.map((a) => (
             <Panel key={a.id} title={a.mode}>
               <div className="flex items-center justify-between">
                 <Link
                   href={`/agents/${a.id}`}
-                  className="font-semibold underline-offset-4 hover:underline"
+                  className="text-[18px] font-medium text-ink underline-offset-4 hover:underline"
                 >
                   {a.name}
                 </Link>
                 <Badge tone={a.status === 'active' ? 'ok' : 'bad'}>{a.status}</Badge>
               </div>
-              <p className="font-mono text-xs text-muted">{short(a.address)}</p>
-              <p className="text-sm">
+              <p className="font-mono text-xs text-mute">{short(a.address)}</p>
+              <p className="text-sm text-body">
                 {a.balances
                   ? `${a.balances.usdc} USDC · ${Number(a.balances.eth).toFixed(4)} ETH`
                   : 'balance unavailable'}
@@ -148,6 +148,20 @@ export default function Agents() {
           </Panel>
         )}
       </section>
+    </>
+  )
+}
+
+export default function Agents() {
+  return (
+    <div className="flex flex-col gap-8">
+      <PageHeader eyebrow="My agents" title="Your agents, your limits.">
+        <p>
+          Each agent gets its own wallet, funded only with what you send. You set the caps; plain
+          code enforces them, and the model never can change them.
+        </p>
+      </PageHeader>
+      <Body />
     </div>
   )
 }

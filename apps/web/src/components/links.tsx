@@ -4,13 +4,18 @@ import { Badge, short } from '@/components/ui'
 import { targetChain } from '@/lib/env'
 
 export function TxLink({ hash, label }: { hash: string | null | undefined; label?: string }) {
-  if (!hash) return <span className="text-muted">—</span>
+  if (!hash) return <span className="text-mute">—</span>
   const url =
     hash.startsWith('0x') && hash.length === 66
       ? explorerTxUrl(targetChain, hash as Hash)
       : undefined
   return url ? (
-    <a href={url} target="_blank" rel="noreferrer" className="font-mono underline">
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="font-mono text-ink underline decoration-hairline-strong underline-offset-4 hover:decoration-ink"
+    >
       {label ?? short(hash)} ↗
     </a>
   ) : (

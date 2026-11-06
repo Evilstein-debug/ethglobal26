@@ -4,7 +4,7 @@ import { arenaAbi } from '@starter/shared/generated'
 import { useAccount, useReadContract, useReadContracts } from 'wagmi'
 import { TxLink } from '@/components/links'
 import { TxStatus } from '@/components/tx-status'
-import { Badge, Button, Empty, Panel, short } from '@/components/ui'
+import { Badge, Button, Empty, PageHeader, Panel, short } from '@/components/ui'
 import { errorText, useApi, useHealth } from '@/lib/api'
 import { useTx } from '@/lib/use-tx'
 
@@ -33,10 +33,11 @@ const time = (ms: number) => new Date(ms).toLocaleString()
 
 function Stat({ label, units }: { label: string; units: bigint | undefined }) {
   return (
-    <div>
-      <p className="text-xs text-muted uppercase tracking-widest">{label}</p>
-      <p className="font-mono text-lg">
+    <div className="flex flex-col gap-2 bg-card p-6">
+      <p className="text-[11px] font-semibold tracking-[1px] text-mute uppercase">{label}</p>
+      <p className="font-display text-[44px] leading-none tracking-[-1px] text-ink">
         {units === undefined ? '—' : (Number(units) / 1e6).toFixed(2)}
+        <span className="ml-2 font-sans text-sm tracking-normal text-mute">USDC</span>
       </p>
     </div>
   )
@@ -53,8 +54,8 @@ function Pool({ arena }: { arena: `0x${string}` }) {
     query: { refetchInterval: 10_000 },
   })
   return (
-    <Panel title="Reward pool (USDC, read onchain)">
-      <div className="flex flex-wrap gap-8">
+    <Panel title="Reward pool · read onchain">
+      <div className="grid gap-px overflow-hidden rounded-lg border border-hairline bg-hairline sm:grid-cols-3">
         <Stat label="Pool balance" units={data?.[0]?.result} />
         <Stat label="Unallocated" units={data?.[1]?.result} />
         <Stat label="Cap per epoch" units={data?.[2]?.result} />
@@ -73,7 +74,7 @@ function Claim({ award, arena }: { award: Award; arena: `0x${string}` }) {
     args: [BigInt(award.epochId), award.humanId],
   })
   return (
-    <div className="flex flex-col gap-2 border-t border-line pt-2 text-sm">
+    <div className="flex flex-col gap-2 border-t border-hairline pt-3 text-sm first:border-0 first:pt-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span>
           Epoch {award.epochId} · {award.category} #{award.rank} ·{' '}
@@ -141,8 +142,14 @@ export default function RewardsPage() {
   const arena = health?.contracts.arena
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Rewards</h1>
+    <div className="flex flex-col gap-8">
+      <PageHeader eyebrow="Rewards" title="Each epoch, the best get paid.">
+        <p>
+          The top traders and the top predictor split a capped USDC budget every epoch, at most one
+          award per human, enforced onchain. Rewards are claimed by the owner&apos;s verified
+          wallet.
+        </p>
+      </PageHeader>
       {arena && <Pool arena={arena} />}
       {arena && <MyAwards arena={arena} />}
       <Panel title="Epochs">
@@ -153,9 +160,12 @@ export default function RewardsPage() {
         ) : data.epochs.length ? (
           <div className="flex flex-col gap-4">
             {data.epochs.map((e) => (
-              <div key={e.id} className="flex flex-col gap-1 border-t border-line pt-2 text-sm">
+              <div
+                key={e.id}
+                className="flex flex-col gap-2 border-t border-hairline pt-4 text-sm first:border-0 first:pt-0"
+              >
                 <p className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono">Epoch {e.id}</span>
+                  <span className="font-medium text-ink">Epoch {e.id}</span>
                   <Badge tone={e.status === 'published' ? 'ok' : 'muted'}>{e.status}</Badge>
                   <span className="text-xs text-muted">
                     {time(e.startsAt)} → {time(e.endsAt)} · budget {e.budgetUsdc?.toFixed(2)} USDC

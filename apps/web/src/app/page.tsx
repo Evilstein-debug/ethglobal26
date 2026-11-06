@@ -1,1 +1,1 @@
-export { App as default } from './app'
+export { Landing as default } from './landing'

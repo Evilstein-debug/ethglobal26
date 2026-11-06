@@ -12,7 +12,7 @@ export function ConnectButton() {
         if (!account || !chain) return <Button onClick={openConnectModal}>Connect wallet</Button>
         if (chain.unsupported) {
           return (
-            <Button onClick={openChainModal} className="bg-bad! text-white!">
+            <Button onClick={openChainModal} className="bg-accent-red! text-white!">
               Wrong network
             </Button>
           )

@@ -7,8 +7,13 @@ import { useState, type ReactNode } from 'react'
 import { WagmiProvider } from 'wagmi'
 import { wagmiConfig } from '@/lib/wagmi'
 
-// Square, monochrome wallet modal to match the app.
-const theme = lightTheme({ borderRadius: 'none', accentColor: '#0a0a0a', fontStack: 'system' })
+// Light wallet modal with a near-black accent, to match the Raycast colours in light mode.
+const theme = lightTheme({
+  borderRadius: 'medium',
+  accentColor: '#111214',
+  accentColorForeground: '#ffffff',
+  fontStack: 'system',
+})
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())

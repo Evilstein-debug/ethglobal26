@@ -57,7 +57,7 @@ function YourWallet({ usdc }: { usdc?: `0x${string}` }) {
   })
   if (tokens == null || !eth) return null
   return (
-    <p className="text-sm text-muted">
+    <p className="text-sm text-mute">
       Your wallet: {formatUnits(tokens, 6)} USDC · {Number(formatUnits(eth.value, 18)).toFixed(4)}{' '}
       ETH
     </p>
@@ -93,7 +93,7 @@ function OwnerControls({ agent }: { agent: AgentView }) {
   return (
     <Panel title="Owner controls">
       <YourWallet usdc={health?.contracts.usdc} />
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-3">
         <div className="flex flex-col gap-2">
           <Field
             label="Fund with USDC"
@@ -161,7 +161,7 @@ function OwnerControls({ agent }: { agent: AgentView }) {
         </div>
       </div>
       <DevWalletFunds />
-      {msg && <p className="text-sm">{msg}</p>}
+      {msg && <p className="text-sm text-body">{msg}</p>}
     </Panel>
   )
 }
@@ -188,23 +188,33 @@ export default function AgentPage() {
   const addrUrl = explorerAddressUrl(targetChain, agent.address)
 
   return (
-    <div className="flex flex-col gap-6">
-      <Panel title={`${agent.mode} agent`}>
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{agent.name}</h1>
+    <div className="flex flex-col gap-8">
+      <header className="flex flex-col gap-3 border-b border-hairline pb-8">
+        <p className="text-[11px] font-semibold tracking-[1px] text-mute uppercase">
+          {agent.mode} agent
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-display text-[44px] leading-[1.05] tracking-[-1px] text-ink md:text-[56px]">
+            {agent.name}
+          </h1>
           <Badge tone={agent.status === 'active' ? 'ok' : 'bad'}>{agent.status}</Badge>
         </div>
-        <p className="font-mono text-xs">
+        <p className="font-mono text-xs text-mute">
           wallet{' '}
           {addrUrl ? (
-            <a className="underline" href={addrUrl} target="_blank" rel="noreferrer">
+            <a
+              className="text-ink underline underline-offset-4"
+              href={addrUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               {agent.address} ↗
             </a>
           ) : (
             agent.address
           )}
         </p>
-        <p className="text-sm">
+        <p className="text-[16px] text-body">
           {agent.balances
             ? `${agent.balances.usdc} USDC · ${Number(agent.balances.eth).toFixed(4)} ETH${agent.balances.weth ? ` · ${Number(agent.balances.weth).toFixed(6)} WETH` : ''}`
             : 'balance unavailable'}
@@ -228,17 +238,17 @@ export default function AgentPage() {
             Replay: this record is sample data, not results of real trades or predictions.
           </p>
         )}
-      </Panel>
+      </header>
 
       {isOwner && <OwnerControls agent={agent} />}
 
       <Panel title="Trades (every commit, including failures)">
         {history?.intents.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-muted">
+            <table className="w-full text-left text-xs whitespace-nowrap [&_td]:pr-4 [&_th]:pr-4 [&_th]:pb-3 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:tracking-[1px] [&_th]:text-mute [&_th]:uppercase">
+              <thead>
                 <tr>
-                  <th className="py-1">Market</th>
+                  <th>Market</th>
                   <th>State</th>
                   <th>Size</th>
                   <th>Entry / SL / TP</th>
@@ -255,8 +265,8 @@ export default function AgentPage() {
                       ? (i.usdcReceived - i.usdcSpent) / 1e6
                       : null
                   return (
-                    <tr key={i.intentId} className="border-t border-line">
-                      <td className="py-1">{i.roundId}</td>
+                    <tr key={i.intentId} className="border-t border-hairline">
+                      <td className="py-3">{i.roundId}</td>
                       <td title={i.failReason ?? ''}>{i.state}</td>
                       <td>{(i.sizeQuote / 1e6).toFixed(2)}</td>
                       <td>
@@ -287,11 +297,14 @@ export default function AgentPage() {
 
       <Panel title="Decisions (0G Private Computer)">
         {activity?.decisions.length ? (
-          <ul className="flex flex-col gap-2 text-xs">
+          <ul className="flex flex-col text-xs">
             {activity.decisions.map((d) => (
-              <li key={d.id} className="flex flex-col gap-1 border-b border-line pb-2">
+              <li
+                key={d.id}
+                className="flex flex-col gap-2 border-b border-hairline py-3 first:pt-0 last:border-0"
+              >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">
+                  <span className="text-sm font-medium text-ink">
                     {d.roundId ? `Market ${d.roundId}` : 'Thought'} · {d.kind}
                   </span>
                   <ModelBadge d={d} />
@@ -299,10 +312,12 @@ export default function AgentPage() {
                     {d.accepted ? 'accepted' : `rejected: ${d.rejectReason}`}
                   </Badge>
                 </div>
-                <span className="font-mono text-muted">request {d.requestId}</span>
+                <span className="font-mono break-all text-mute">request {d.requestId}</span>
                 <details>
-                  <summary className="cursor-pointer text-muted">model output</summary>
-                  <pre className="whitespace-pre-wrap break-all">{d.rawOutput}</pre>
+                  <summary className="cursor-pointer text-mute">model output</summary>
+                  <pre className="mt-2 rounded-lg border border-hairline bg-elevated p-3 font-mono whitespace-pre-wrap break-all text-body">
+                    {d.rawOutput}
+                  </pre>
                 </details>
               </li>
             ))}

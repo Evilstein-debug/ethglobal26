@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useAccount } from 'wagmi'
-import { Badge, Button, Empty, Panel, short } from '@/components/ui'
+import { Badge, Button, Empty, PageHeader, Panel, short } from '@/components/ui'
 import { useApi } from '@/lib/api'
 
 type AgentNow = {
@@ -84,14 +84,14 @@ function AgentCard({ agent, serverTime }: { agent: AgentNow; serverTime: number 
       <div className="flex items-start justify-between gap-2">
         <Link
           href={`/agents/${agent.id}`}
-          className="font-semibold underline-offset-4 hover:underline"
+          className="text-[18px] font-medium text-ink underline-offset-4 hover:underline"
         >
           {agent.name}
         </Link>
         <Badge tone={tone(agent.state)}>{label(agent.state)}</Badge>
       </div>
-      <p className="text-sm">{agent.detail}</p>
-      <p className="text-xs text-muted">
+      <p className="text-sm leading-relaxed text-body">{agent.detail}</p>
+      <p className="text-xs text-mute">
         {BUSY.includes(agent.state) || agent.state === 'paused'
           ? ' '
           : wait > 0
@@ -121,13 +121,13 @@ function Row({ e }: { e: ActivityEvent }) {
   const step = STEPS.includes(e.state)
   return (
     <li
-      className={`flex flex-col gap-1 border-b border-line py-3 last:border-0 ${
-        step ? 'ml-4 border-l-2 border-l-line pl-3' : ''
+      className={`flex flex-col gap-1 border-b border-hairline py-4 last:border-0 ${
+        step ? 'ml-4 border-l-2 border-l-hairline-strong pl-4' : ''
       }`}
     >
       <div className="flex flex-wrap items-baseline gap-2 text-sm">
         <span className="font-mono text-xs text-muted">{new Date(e.at).toLocaleTimeString()}</span>
-        <Link href={`/agents/${e.agentId}`} className="font-semibold">
+        <Link href={`/agents/${e.agentId}`} className="font-medium text-ink hover:underline">
           {e.agentName}
         </Link>
         <Badge tone={tone(e.state)}>{label(e.state)}</Badge>
@@ -145,16 +145,19 @@ function Row({ e }: { e: ActivityEvent }) {
           {e.message}
         </span>
         {e.entryId != null && (
-          <Link href={`/entries/${e.entryId}`} className="text-xs underline">
+          <Link
+            href={`/entries/${e.entryId}`}
+            className="text-xs font-medium text-ink underline underline-offset-4"
+          >
             View entry
           </Link>
         )}
       </div>
-      {e.rationale && <p className="text-sm text-muted">“{e.rationale}”</p>}
+      {e.rationale && <p className="text-sm leading-relaxed text-body">“{e.rationale}”</p>}
       {e.detail && (
         <details className="text-xs text-muted">
           <summary className="cursor-pointer">Full result</summary>
-          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all border border-line p-2 font-mono">
+          <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-hairline bg-elevated p-3 font-mono whitespace-pre-wrap break-all text-body">
             {pretty(e.detail)}
           </pre>
         </details>
@@ -176,22 +179,27 @@ export default function LivePage() {
   if (!data) return <Empty>Loading…</Empty>
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-sm text-muted">
+    <div className="flex flex-col gap-10">
+      <PageHeader
+        eyebrow="Live"
+        title="Watch agents think."
+        actions={
+          address && (
+            <Button variant="outline" onClick={() => setMine(!mine)}>
+              {mine ? 'Show all agents' : 'Show only my agents'}
+            </Button>
+          )
+        }
+      >
+        <p>
           Agents act on their own. Everything they think, every tool they ask for and what came
           back, and every decision the guardrails rejected shows up here as it happens. Indented
           rows are the steps inside one thought.
         </p>
-        {address && (
-          <Button variant="outline" onClick={() => setMine(!mine)}>
-            {mine ? 'Show all agents' : 'Show only my agents'}
-          </Button>
-        )}
-      </div>
+      </PageHeader>
 
       {data.agents.length ? (
-        <section className="grid gap-px border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.agents.map((a) => (
             <AgentCard key={a.id} agent={a} serverTime={data.serverTime} />
           ))}
@@ -199,7 +207,7 @@ export default function LivePage() {
       ) : (
         <Empty>
           {mine ? 'You have no agents yet.' : 'No agents yet.'}{' '}
-          <Link href="/agents" className="underline">
+          <Link href="/agents" className="font-medium text-ink underline underline-offset-4">
             Create one
           </Link>
         </Empty>
