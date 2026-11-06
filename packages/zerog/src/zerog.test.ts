@@ -68,6 +68,45 @@ test('fails closed unless the TEE signature verified', async () => {
   }
 })
 
+test('no Router flag: our own check of the TEE signature decides, and still fails closed', async () => {
+  const { tee_verified: _none, ...trace } = ok.x_0g_trace
+  const { fn } = fakeFetch(200, { ...ok, x_0g_trace: trace })
+  const client = (verifyTee: (p: string, c: string) => Promise<boolean | null>) =>
+    new ZeroGClient({ apiKey: 'k', fetch: fn, verifyTee }).complete({ system: '', user: '' })
+
+  const seen: string[] = []
+  const res = await client(async (provider, chatId) => {
+    seen.push(provider, chatId)
+    return true
+  })
+  assert.equal(res.teeVerified, true)
+  assert.deepEqual(seen, [ok.x_0g_trace.provider, 'chatcmpl-1'])
+
+  for (const verify of [
+    async () => false,
+    async () => null,
+    async () => {
+      throw new Error('0G chain down')
+    },
+  ]) {
+    await assert.rejects(
+      client(verify),
+      (e: unknown) => (e as ZeroGError).code === 'tee_unverified',
+    )
+  }
+})
+
+test('a false Router flag is never overruled by our own check', async () => {
+  const { fn } = fakeFetch(200, { ...ok, x_0g_trace: { ...ok.x_0g_trace, tee_verified: false } })
+  await assert.rejects(
+    new ZeroGClient({ apiKey: 'k', fetch: fn, verifyTee: async () => true }).complete({
+      system: '',
+      user: '',
+    }),
+    (e: unknown) => (e as ZeroGError).code === 'tee_unverified',
+  )
+})
+
 test('missing request id, empty output and HTTP errors are typed errors', async () => {
   const cases: [number, unknown, string][] = [
     [200, { ...ok, x_0g_trace: {} }, 'no_request_id'],

@@ -58,8 +58,13 @@ export type ZeroGClientOptions = {
   model?: string
   /** 'private' = TeeML only (default). Anything else is refused: the prize needs sealed inference. */
   trustMode?: 'private'
-  /** Require x_0g_trace.tee_verified === true (default true). */
+  /** Require a verified TEE signature (default true). */
   requireTee?: boolean
+  /**
+   * Independent check of the provider's TEE signature (SDK `processResponse`). Used when the
+   * Router's response carries no `tee_verified` flag.
+   */
+  verifyTee?: (provider: string, chatId: string) => Promise<boolean | null>
   timeoutMs?: number
   fetch?: typeof fetch
 }
@@ -75,7 +80,10 @@ type ChatResponse = {
 export class ZeroGClient implements LLMClient {
   readonly kind = '0g' as const
   readonly model: string
-  readonly #o: Required<Omit<ZeroGClientOptions, 'fetch' | 'model'>> & { fetch: typeof fetch }
+  readonly #o: Required<Omit<ZeroGClientOptions, 'fetch' | 'model' | 'verifyTee'>> & {
+    fetch: typeof fetch
+    verifyTee?: ZeroGClientOptions['verifyTee']
+  }
 
   constructor(opts: ZeroGClientOptions) {
     if (!opts.apiKey) throw new Error('ZeroGClient: apiKey is required')
@@ -89,6 +97,7 @@ export class ZeroGClient implements LLMClient {
       requireTee: opts.requireTee ?? true,
       timeoutMs: opts.timeoutMs ?? 60_000,
       fetch: opts.fetch ?? globalThis.fetch,
+      verifyTee: opts.verifyTee,
     }
   }
 
@@ -146,6 +155,9 @@ export class ZeroGClient implements LLMClient {
         res.status,
         trace,
       )
+    if (trace.teeVerified == null && this.#o.verifyTee && trace.chatId) {
+      trace.teeVerified = await this.#o.verifyTee(trace.provider, trace.chatId).catch(() => null)
+    }
     if (this.#o.requireTee && trace.teeVerified !== true) {
       throw new ZeroGError(
         'tee_unverified',
