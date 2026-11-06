@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { keccak256, toBytes, type Address, type PublicClient } from 'viem'
 import { canonicalJson } from './canonical'
 import { LOCAL_CHAIN_ID } from './chains'
-import { expectedOutcome, verifyEntry, type EntryBundle } from './verify'
+import { expectedOutcome, FUNDS_DRAINED_NOTE, verifyEntry, type EntryBundle } from './verify'
 
 const BASE = 8453
 const addr = (n: number) => `0x${String(n).padStart(40, '0')}` as Address
@@ -180,4 +180,13 @@ test('expectedOutcome follows the resolver rules', () => {
   assert.equal(expectedOutcome([]).voidReason, 'no_trades')
   assert.equal(expectedOutcome([intent({ state: 'FAILED' })]).voidReason, 'no_trades')
   assert.equal(expectedOutcome([intent({ state: 'EXECUTED' })]).voidReason, 'unsettled_intent')
+})
+
+test('expectedOutcome says funds_withdrawn when Flash ended an order for lack of funds', () => {
+  const open = intent({ state: 'EXECUTED', usdcReceived: null })
+  assert.equal(expectedOutcome([open]).voidReason, 'unsettled_intent')
+  assert.equal(
+    expectedOutcome([{ ...open, flashNote: FUNDS_DRAINED_NOTE }]).voidReason,
+    'funds_withdrawn',
+  )
 })

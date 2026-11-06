@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { canonicalHash } from './canonical'
 import { compareDecimal, predictionSchema, tradeIntentSchema } from './schemas'
 
 const intent = {
@@ -74,4 +75,39 @@ test('agent predictions need a 0G ref; owner picks must not have one', () => {
   const owner = { ...prediction, predictorKind: 'owner', zeroG: null }
   assert.equal(predictionSchema.safeParse(owner).success, true)
   assert.equal(predictionSchema.safeParse({ ...owner, zeroG: prediction.zeroG }).success, false)
+})
+
+test('a TWAP plan is part of the committed intent; plain intents keep their hash', () => {
+  const plain = tradeIntentSchema.parse(intent)
+  assert.equal(canonicalHash(plain), canonicalHash(intent), 'no execution field, no change')
+  const twap = tradeIntentSchema.parse({
+    ...intent,
+    execution: { style: 'twap', durationSeconds: 300, buckets: 3 },
+  })
+  assert.notEqual(canonicalHash(twap), canonicalHash(plain))
+  // Nonsense plans and extra fields are refused (Flash enforces its own 5 minute minimum).
+  for (const execution of [
+    { style: 'twap', durationSeconds: 10, buckets: 3 },
+    { style: 'twap', durationSeconds: 300, buckets: 1 },
+    { style: 'iceberg', durationSeconds: 300, buckets: 3 },
+    { style: 'twap', durationSeconds: 300, buckets: 3, limitPrice: '1' },
+  ]) {
+    assert.equal(tradeIntentSchema.safeParse({ ...intent, execution }).success, false)
+  }
+})
+
+test('a limit plan is committed with the intent, and the bracket is measured from the limit', () => {
+  const limit = { style: 'limit', limitPrice: '2970', expireSeconds: 600 }
+  const ok = { ...intent, stopPrice: '2940', targetPrice: '3030', execution: limit }
+  const parsed = tradeIntentSchema.parse(ok)
+  assert.notEqual(canonicalHash(parsed), canonicalHash(intent))
+  const bad = (over: Record<string, unknown>) =>
+    tradeIntentSchema.safeParse({ ...ok, ...over }).success
+  assert.equal(bad({}), true)
+  assert.equal(bad({ execution: { ...limit, limitPrice: '3000' } }), false, 'not below the market')
+  assert.equal(bad({ execution: { ...limit, limitPrice: '3100' } }), false)
+  assert.equal(bad({ stopPrice: '2980' }), false, 'stop above the limit')
+  assert.equal(bad({ targetPrice: '2960' }), false, 'target below the limit')
+  assert.equal(bad({ execution: { ...limit, expireSeconds: 5 } }), false)
+  assert.equal(bad({ execution: { ...limit, extra: 1 } }), false)
 })

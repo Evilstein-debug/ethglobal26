@@ -25,6 +25,8 @@ import { think } from '../brain/decide'
 import type { AppContext } from '../context'
 import { queryRows, schema } from '../db'
 import { closePosition, syncExit } from '../execution/close'
+import { settleResting } from '../execution/resting'
+import { governTwap } from '../execution/twap'
 import { recoverStuckIntents } from '../execution/trade'
 import { settleEpoch, type EpochConfig } from '../rewards/epoch'
 import { logActivity, setStatus, wakeAgent } from '../services/activity'
@@ -178,10 +180,14 @@ async function broadcastMarket(
 }
 
 async function stepOpening(ctx: AppContext, cfg: MarketConfig, market: Market) {
-  const [intent] = await ctx.db
-    .select()
-    .from(schema.intents)
-    .where(eq(schema.intents.roundId, market.id))
+  const intentOf = async () =>
+    (await ctx.db.select().from(schema.intents).where(eq(schema.intents.roundId, market.id)))[0]
+  let intent = await intentOf()
+  // A limit entry waits at Flash. Only when it fills does the trade become a market.
+  if (intent?.state === 'RESTING') {
+    await settleResting(ctx, intent.intentId)
+    intent = await intentOf()
+  }
   if (intent?.state === 'FAILED') return settleEmptyMarket(ctx, market.id)
   if (!intent) {
     // Reserved, then the server stopped before the intent was written.
@@ -235,6 +241,7 @@ async function stepOpen(ctx: AppContext, cfg: MarketConfig, market: Market) {
   for (const { id } of await openIntents()) {
     // Flash being down or the agent being paused must never hold up the lock below.
     try {
+      await governTwap(ctx, id)
       await syncExit(ctx, id)
       if (now >= closesAt) {
         const closed = await closePosition(ctx, id)

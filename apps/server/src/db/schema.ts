@@ -158,7 +158,7 @@ export const intents = pgTable(
     canonicalJson: text('canonical_json').notNull(),
     intentHash: text('intent_hash').notNull().unique(),
     state: text('state', {
-      enum: ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED', 'CLOSED', 'FAILED'],
+      enum: ['DRAFT', 'COMMITTED', 'EXECUTING', 'RESTING', 'EXECUTED', 'CLOSED', 'FAILED'],
     }).notNull(),
     asset: text('asset').notNull(),
     sizeQuote: num('size_quote').notNull(),
@@ -172,6 +172,26 @@ export const intents = pgTable(
     flashOrderId: text('flash_order_id'),
     flashBracketOrderId: text('flash_bracket_order_id'),
     flashCloseOrderId: text('flash_close_order_id'),
+    /**
+     * 'market' (one buy), 'twap' (tranches that predictors can trim, execution/twap.ts) or
+     * 'limit' (a resting buy that opens the market only when it fills, execution/resting.ts).
+     */
+    entryStyle: text('entry_style', { enum: ['market', 'twap', 'limit'] })
+      .notNull()
+      .default('market'),
+    twapBuckets: integer('twap_buckets'),
+    twapDurationSec: integer('twap_duration_sec'),
+    /** When the crowd is next consulted about the remaining tranches (unix ms). */
+    twapNextCheckAt: num('twap_next_check_at'),
+    /** A limit entry: the USD level it rests at, and when it is cancelled if still unfilled. */
+    limitPrice: text('limit_price'),
+    restingUntil: num('resting_until'),
+    /** Live quote session: WETH out of the first and of the signed quote, and the revisions seen. */
+    quoteFirstOut: text('quote_first_out'),
+    quoteFinalOut: text('quote_final_out'),
+    quoteRevisions: integer('quote_revisions'),
+    /** Something Flash did on its own, e.g. cancelled a resting order for lack of funds. */
+    flashNote: text('flash_note'),
     entryFillTx: text('entry_fill_tx'),
     exitFillTx: text('exit_fill_tx'),
     /** Realized amounts from Flash fills, USDC base units. */
@@ -252,6 +272,8 @@ export const ACTIVITY_ONLY_STATES = [
   'thought',
   'tool_call',
   'tool_result',
+  'twap',
+  'flash',
 ] as const
 
 /** What each agent is doing right now, and when it next thinks. */

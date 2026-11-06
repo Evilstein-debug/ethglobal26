@@ -11,7 +11,42 @@ import { Badge, Empty, Panel, short } from '@/components/ui'
 import { errorText, useApi } from '@/lib/api'
 import { targetChain } from '@/lib/env'
 
-type Bundle = EntryBundle & { chainId: number }
+/** What the entry endpoint adds to a trade: how it was entered, and what Flash itself reports. */
+type TradeExtras = {
+  entryStyle?: 'market' | 'twap' | 'limit'
+  limitPrice?: string | null
+  twapBuckets?: number | null
+  twapDurationSec?: number | null
+  quoteFirstOut?: string | null
+  quoteFinalOut?: string | null
+  quoteRevisions?: number | null
+  flashNote?: string | null
+}
+
+type ReceiptOrder = {
+  role: 'entry' | 'bracket' | 'close'
+  orderId: string
+  type: string
+  status: string
+  closeReason: string | null
+  tranches: { done: number; total: number } | null
+  legs: { triggerType: string; priceUsd: string | null }[]
+  fills: { at: string; priceUsd: string; tx: string; usdc: string; weth: string; feeUsd: string }[]
+  usdc: string | null
+}
+type PnL = { spent: number; received: number; pnl: number }
+type Receipt =
+  | { available: false; reason: string }
+  | {
+      available: true
+      source: 'flash' | 'local-stub'
+      orders: ReceiptOrder[]
+      flash: PnL | null
+      ours: PnL | null
+      matches: boolean | null
+    }
+
+type Bundle = EntryBundle & { chainId: number; receipts?: Record<string, Receipt> }
 
 const pct = (bps: number | null | undefined) => (bps == null ? '—' : `${(bps / 100).toFixed(2)}%`)
 const usdc = (units: number | null) => (units == null ? '—' : (units / 1e6).toFixed(6))
@@ -20,6 +55,115 @@ const MARK: Record<VerifyStatus, { icon: string; color: string }> = {
   pass: { icon: '✓', color: 'text-ok' },
   fail: { icon: '✗', color: 'text-bad' },
   skip: { icon: '–', color: 'text-muted' },
+}
+
+const ROLE: Record<ReceiptOrder['role'], string> = {
+  entry: 'Entry',
+  bracket: 'Bracket exit',
+  close: 'Time-limit sale',
+}
+
+/** Flash's own report of the orders, next to the PnL we resolved from. A mismatch is shown. */
+function FlashReceipt({ receipt }: { receipt: Receipt | undefined }) {
+  if (!receipt) return null
+  if (!receipt.available)
+    return <p className="text-xs text-muted">Flash receipt unavailable: {receipt.reason}</p>
+  const row = (label: string, p: PnL | null) =>
+    p ? (
+      <tr className="border-t border-line">
+        <td className="py-1 pr-4">{label}</td>
+        <td className="pr-4 font-mono">{usdc(p.spent)}</td>
+        <td className="pr-4 font-mono">{usdc(p.received)}</td>
+        <td className="font-mono">{usdc(p.pnl)}</td>
+      </tr>
+    ) : null
+  return (
+    <div className="flex flex-col gap-2 rounded border border-line p-2">
+      <p className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+        Flash receipt
+        {receipt.source === 'local-stub' && <Badge>local stub, not Flash</Badge>}
+        {receipt.matches === true && <Badge tone="ok">matches our PnL</Badge>}
+        {receipt.matches === false && <Badge tone="bad">does not match our PnL</Badge>}
+      </p>
+      <ul className="flex flex-col gap-2 text-xs">
+        {receipt.orders.map((o) => (
+          <li key={o.orderId} className="flex flex-col gap-0.5">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{ROLE[o.role]}</span>
+              <Badge>{o.type}</Badge>
+              <Badge tone={o.status === 'filled' ? 'ok' : 'muted'}>{o.status}</Badge>
+              {o.tranches && (
+                <span>
+                  tranche {o.tranches.done} of {o.tranches.total}
+                </span>
+              )}
+              {o.closeReason && <span className="text-muted">{o.closeReason}</span>}
+            </span>
+            {o.legs.length > 0 && (
+              <span className="font-mono text-muted">
+                {o.legs.map((l) => `${l.triggerType} ${l.priceUsd ?? '—'}`).join(' · ')}
+              </span>
+            )}
+            {o.fills.map((f) => (
+              <span key={f.tx} className="flex flex-wrap gap-x-3 font-mono text-muted">
+                <span>fill @ {Number(f.priceUsd).toFixed(2)}</span>
+                <span>{f.usdc} USDC</span>
+                <span>fee ${Number(f.feeUsd).toFixed(4)}</span>
+                <TxLink hash={f.tx} />
+              </span>
+            ))}
+          </li>
+        ))}
+      </ul>
+      {receipt.flash && (
+        <table className="text-left text-xs">
+          <thead className="text-muted">
+            <tr>
+              <th className="pr-4 font-normal">USDC</th>
+              <th className="pr-4 font-normal">spent</th>
+              <th className="pr-4 font-normal">received</th>
+              <th className="font-normal">PnL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {row('Per Flash', receipt.flash)}
+            {row('Per us', receipt.ours)}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/** How the entry was built: a TWAP's tranches, and what the quote did while we listened. */
+function EntryNotes({ i, entryRef }: { i: TradeExtras; entryRef: string }) {
+  const bits: string[] = []
+  if (i.entryStyle === 'twap' && i.twapBuckets && i.twapDurationSec)
+    bits.push(
+      `TWAP: ${i.twapBuckets} tranches over ${Math.round(i.twapDurationSec / 60)} min, which predictors could trim`,
+    )
+  if (i.entryStyle === 'limit' && i.limitPrice)
+    bits.push(
+      `Limit entry: rested at ${i.limitPrice} and opened the market only when it filled (market ${entryRef})`,
+    )
+  if ((i.quoteRevisions ?? 0) > 1 && i.quoteFirstOut && i.quoteFinalOut) {
+    const first = Number(i.quoteFirstOut)
+    const move = first > 0 ? ((Number(i.quoteFinalOut) - first) / first) * 100 : 0
+    bits.push(
+      `Quote stream: ${i.quoteRevisions} quotes, signed the newest (${move >= 0 ? '+' : ''}${move.toFixed(3)}% WETH vs the first)`,
+    )
+  }
+  if (!bits.length && !i.flashNote) return null
+  return (
+    <div className="flex flex-col gap-0.5 text-xs">
+      {bits.map((b) => (
+        <span key={b} className="text-muted">
+          {b}
+        </span>
+      ))}
+      {i.flashNote && <span className="text-bad">{i.flashNote}</span>}
+    </div>
+  )
 }
 
 /** Runs in this browser against the chain; the server only supplies the claims being checked. */
@@ -114,6 +258,7 @@ export default function EntryPage() {
                   {decisionOf(i.decisionId) && <ModelBadge d={decisionOf(i.decisionId)!} />}
                 </div>
                 {i.failReason && <p className="break-words text-xs text-bad">{i.failReason}</p>}
+                <EntryNotes i={i as typeof i & TradeExtras} entryRef={i.entryRefPrice} />
                 <p className="flex flex-wrap gap-x-4 font-mono text-xs text-muted">
                   <span>spent {usdc(i.usdcSpent)}</span>
                   <span>received {usdc(i.usdcReceived)}</span>
@@ -130,6 +275,7 @@ export default function EntryPage() {
                     exit fill <TxLink hash={i.exitFillTx} />
                   </span>
                 </p>
+                <FlashReceipt receipt={data.receipts?.[i.intentId]} />
               </div>
             ))}
           </div>

@@ -53,6 +53,12 @@ export type QuoteRequest = {
   /** Integer bps as a string; the same value must be sent on the order. */
   flashIntegratorFeeBps?: string
   expireTime?: string
+  /** TWAP only. Total seconds (Flash minimum 300). Quote-time only: not echoed on submit. */
+  durationSeconds?: number
+  /** TWAP only. Number of tranches. Must match between quote and submit. */
+  twapBucketCount?: number
+  /** Limit only. USD price of the target asset: a buy fills at or below it. Same on submit. */
+  limitNotionalPrice?: string
   attachedBracket?: { takeProfit: BracketLeg; stopLoss: BracketLeg; expireTime?: string }
 }
 
@@ -86,7 +92,10 @@ export type QuoteResponse = {
   } | null
 }
 
-export type SubmitOrderRequest = Omit<QuoteRequest, 'attachedBracket' | 'funderAddress'> & {
+export type SubmitOrderRequest = Omit<
+  QuoteRequest,
+  'attachedBracket' | 'funderAddress' | 'durationSeconds'
+> & {
   funderAddress: string
   quoteId?: string
   userSignature: string
@@ -150,6 +159,9 @@ export type FlashOrder = {
     expiresAt: string | null
   } | null
   sourceEntryOrderId?: string | null
+  /** TWAP progress: tranches planned and tranches filled so far. */
+  twapBucketCount?: number | null
+  completedFillCount?: number | null
   placedAt: string | null
   closedAt: string | null
 }
@@ -171,6 +183,17 @@ export type FlashAsset = {
   marketCap?: string
 }
 
+/**
+ * A live quote session (Flash Quotes WebSocket). Every revision replaces the last and carries its
+ * own quoteId; submitting one consumes the session, so keep it open until the order is sent.
+ */
+export type QuoteStream = {
+  first: QuoteResponse
+  latest(): QuoteResponse
+  revisions(): number
+  close(): void
+}
+
 /** The calls AgentArena makes. FlashClient talks to Flash; LocalFlashStub is for anvil tests. */
 export interface FlashApi {
   readonly kind: 'flash' | 'local-stub'
@@ -179,4 +202,6 @@ export interface FlashApi {
   submitOrder(req: SubmitOrderRequest): Promise<SubmitOrderResponse>
   getOrder(orderId: string, funderAddress: string): Promise<GetOrderResponse>
   cancelOrder(orderId: string, userSignature: string): Promise<void>
+  /** Optional: stream quote revisions for a market order. Callers fall back to `quote`. */
+  openQuoteStream?(req: QuoteRequest): Promise<QuoteStream>
 }

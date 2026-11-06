@@ -5,6 +5,7 @@ import { Router, type Request } from 'express'
 import { getAddress } from 'viem'
 import type { AppContext } from '../context'
 import { queryRows, schema } from '../db'
+import { flashReceipt } from '../execution/receipt'
 import { handler, HttpError } from '../http'
 
 const usdc = (units: number | null | undefined) => (units == null ? null : units / 1e6)
@@ -265,6 +266,11 @@ export function arenaRouter(ctx: AppContext) {
           owner: getAddress(trader.ownerWallet),
         },
         intents,
+        receipts: Object.fromEntries(
+          await Promise.all(
+            intents.map(async (i) => [i.intentId, await flashReceipt(ctx, i)] as const),
+          ),
+        ),
         predictions,
         decisions,
         contracts: ctx.contracts,

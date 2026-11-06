@@ -66,6 +66,33 @@ export type BrainConfig = {
   tradeCooldownMs: number
   /** How many tool calls an agent may make in one thought before it must decide. */
   maxSteps: number
+  /** Limits on TWAP entries and on how far the crowd may trim them (execution/twap.ts). */
+  twap: TwapConfig
+  /** Limits on limit entries (execution/resting.ts). */
+  limit: LimitConfig
+}
+
+export type LimitConfig = {
+  /** How far below the live price the limit may sit, as fractions of price (0.003 = 0.3%). */
+  minDipPct: number
+  maxDipPct: number
+  /** How long the order may rest before it is cancelled unfilled. */
+  minWaitSeconds: number
+  maxWaitSeconds: number
+}
+
+export type TwapConfig = {
+  /** Flash's own minimum is 300s; the model may pick anything in [minSeconds, maxSeconds]. */
+  minSeconds: number
+  maxSeconds: number
+  minBuckets: number
+  maxBuckets: number
+  /** Smallest tranche, USDC base units. */
+  minSlice: number
+  /** Predictions needed before the crowd can cancel the rest. With fewer, the TWAP just runs. */
+  minVoters: number
+  /** The mean probability of YES (bps) at or below which the remaining tranches are cancelled. */
+  trimAtOrBelowBps: number
 }
 
 export const DEFAULT_BRAIN: BrainConfig = {
@@ -77,6 +104,16 @@ export const DEFAULT_BRAIN: BrainConfig = {
   minRewardRisk: 1,
   tradeCooldownMs: 0,
   maxSteps: 4,
+  twap: {
+    minSeconds: 300,
+    maxSeconds: 900,
+    minBuckets: 2,
+    maxBuckets: 6,
+    minSlice: 500_000,
+    minVoters: 1,
+    trimAtOrBelowBps: 4_500,
+  },
+  limit: { minDipPct: 0.001, maxDipPct: 0.03, minWaitSeconds: 300, maxWaitSeconds: 1_800 },
 }
 
 export type FlashSetup = {
@@ -91,4 +128,9 @@ export type FlashSetup = {
   /** Poll cadence while waiting for fills. */
   pollMs: number
   fillTimeoutMs: number
+  /**
+   * How long a market entry listens to the Quotes WebSocket before signing the newest quote.
+   * 0 (or an API without streaming) quotes once over REST.
+   */
+  quoteWindowMs?: number
 }

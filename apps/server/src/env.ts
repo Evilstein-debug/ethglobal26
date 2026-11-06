@@ -55,6 +55,23 @@ export const env = {
     typedDataContracts: addressList('FLASH_TYPED_DATA_CONTRACTS'),
     /** Optional ERC-8021 builder code (base.dev) attached to order submits. */
     attributionCode: process.env.FLASH_ATTRIBUTION_CODE || undefined,
+    /** How long a market entry listens to the Quotes WebSocket before signing (0 = REST only). */
+    quoteWindowMs: Number(process.env.FLASH_QUOTE_WINDOW_MS ?? (local ? 1500 : 3000)) || 0,
+  },
+  /**
+   * TWAP entries. Flash refuses anything under 300s, so a real chain never goes below it; the
+   * local stub may, to make a demo quick. The crowd (predictors) can cancel the remaining tranches.
+   */
+  /** Limit entries: how long a resting buy may wait for its price before it is cancelled. */
+  limit: {
+    minWaitSeconds: Number(process.env.LIMIT_MIN_WAIT_SECONDS) || 300,
+    maxWaitSeconds: Number(process.env.LIMIT_MAX_WAIT_SECONDS) || 1_800,
+  },
+  twap: {
+    minSeconds: Math.max(local ? 30 : 300, Number(process.env.TWAP_MIN_SECONDS) || 300),
+    maxSeconds: Number(process.env.TWAP_MAX_SECONDS) || 900,
+    minVoters: Number(process.env.TWAP_MIN_VOTERS) || 1,
+    trimAtOrBelowBps: Number(process.env.TWAP_TRIM_AT_OR_BELOW_BPS) || 4_500,
   },
   /** LOCAL ANVIL ONLY: real ETH/USD spot price for the Flash stub. Empty keeps the fixed price. */
   localPriceFeedUrl: local ? process.env.LOCAL_PRICE_FEED_URL || undefined : undefined,

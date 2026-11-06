@@ -69,6 +69,8 @@ export type EntryBundle = {
     exitFillTx: string | null
     usdcSpent: number | null
     usdcReceived: number | null
+    /** Something Flash did on its own, e.g. ended an order because the wallet was emptied. */
+    flashNote?: string | null
   }[]
   predictions: {
     predictionId: string
@@ -114,10 +116,25 @@ const before = (a: Pos, b: Pos) =>
     ? a.blockNumber < b.blockNumber
     : a.transactionIndex < b.transactionIndex
 
+/** Written on an intent when Flash itself ended an order for lack of funds in the wallet. */
+export const FUNDS_DRAINED_NOTE = 'Flash cancelled the order: the wallet no longer held the funds'
+
 /** Realized PnL rule from the resolver, recomputed from the bundle. */
 export function expectedOutcome(intents: EntryBundle['intents']) {
-  if (intents.some((i) => ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED'].includes(i.state)))
-    return { outcome: 'VOID' as const, pnlBps: 0, pnl: 0, spent: 0, voidReason: 'unsettled_intent' }
+  if (
+    intents.some((i) =>
+      ['DRAFT', 'COMMITTED', 'EXECUTING', 'RESTING', 'EXECUTED'].includes(i.state),
+    )
+  ) {
+    const drained = intents.some((i) => i.flashNote === FUNDS_DRAINED_NOTE)
+    return {
+      outcome: 'VOID' as const,
+      pnlBps: 0,
+      pnl: 0,
+      spent: 0,
+      voidReason: drained ? 'funds_withdrawn' : 'unsettled_intent',
+    }
+  }
   const closed = intents.filter(
     (i) => i.state === 'CLOSED' && i.usdcSpent != null && i.usdcReceived != null,
   )

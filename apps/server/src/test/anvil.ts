@@ -94,6 +94,9 @@ export async function startAnvilWorld() {
   ])
 
   const db = await freshDb()
+  /** A test can move time forward (TWAP tranches, check intervals) without sleeping. */
+  const clock = { offset: 0 }
+  const now = () => Date.now() + clock.offset
   const stubSettlement = '0x000000000000000000000000000000000000F1a5' as Address
   const stub = new LocalFlashStub({
     chainId: anvil.id,
@@ -102,6 +105,7 @@ export async function startAnvilWorld() {
     usdc,
     weth,
     priceUsd: 3000,
+    now,
   })
   const flash: FlashSetup = {
     api: stub,
@@ -135,7 +139,7 @@ export async function startAnvilWorld() {
     allowManualTrades: true,
     brain: DEFAULT_BRAIN,
     readNews: newsReader([]),
-    now: Date.now,
+    now,
   }
 
   /** Verified owner (registered onchain) — what POST /api/owners/verify does. */
@@ -223,6 +227,7 @@ export async function startAnvilWorld() {
     fundPool,
     walletFor,
     mintWeth,
+    advance: (ms: number) => void (clock.offset += ms),
     contracts: ctx.contracts,
   }
 }

@@ -58,12 +58,65 @@ export const tradeIntentSchema = z
     targetPrice: positiveDecimal,
     rationale: z.string().max(500),
     zeroG: zeroGRef,
+    /**
+     * How the entry is built. Absent = one market buy. The plan is committed with the intent, so
+     * the schedule or the price level is on record before anything is sent. Committed hashes of
+     * older intents don't change.
+     */
+    execution: z
+      .discriminatedUnion('style', [
+        z
+          .object({
+            style: z.literal('twap'),
+            /** Total seconds. Flash enforces its own minimum (300); the server config stays above it. */
+            durationSeconds: z.number().int().min(30),
+            buckets: z.number().int().min(2).max(24),
+          })
+          .strict(),
+        z
+          .object({
+            style: z.literal('limit'),
+            /** USD price the buy rests at. Must be below entryRefPrice. */
+            limitPrice: positiveDecimal,
+            /** How long the order may rest before it is cancelled unfilled. */
+            expireSeconds: z.number().int().min(30),
+          })
+          .strict(),
+      ])
+      .optional(),
     createdAt: z.iso.datetime(),
   })
   .strict()
   .superRefine((intent, ctx) => {
     const prices = [intent.entryRefPrice, intent.stopPrice, intent.targetPrice]
     if (!prices.every((p) => typeof p === 'string' && DECIMAL_RE.test(p))) return // reported above
+    // A limit buy enters at its limit price, so the bracket is measured from there.
+    const limit = intent.execution?.style === 'limit' ? intent.execution.limitPrice : null
+    if (limit !== null) {
+      if (!DECIMAL_RE.test(limit)) return
+      if (compareDecimal(limit, intent.entryRefPrice) >= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['execution', 'limitPrice'],
+          message: 'limit must be below the reference price',
+        })
+      }
+      if (compareDecimal(intent.stopPrice, limit) >= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['stopPrice'],
+          message: 'stop must be below the limit',
+        })
+      }
+      if (compareDecimal(intent.targetPrice, limit) <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['targetPrice'],
+          message: 'target must be above the limit',
+        })
+      }
+      return
+    }
     if (compareDecimal(intent.stopPrice, intent.entryRefPrice) >= 0) {
       ctx.addIssue({ code: 'custom', path: ['stopPrice'], message: 'stop must be below entry' })
     }

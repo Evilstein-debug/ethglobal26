@@ -11,6 +11,7 @@ import type {
   GetOrderResponse,
   QuoteRequest,
   QuoteResponse,
+  QuoteStream,
   SubmitOrderRequest,
   SubmitOrderResponse,
 } from './types'
@@ -25,6 +26,16 @@ export class FlashApiError extends Error {
     super(`Flash ${status} ${code}: ${message}`)
     this.name = 'FlashApiError'
   }
+}
+
+/** The slice of the standard WebSocket we use (Node 22 ships it; @types/node 20 does not). */
+type Socket = {
+  onopen: (() => void) | null
+  onmessage: ((ev: { data: unknown }) => void) | null
+  onerror: (() => void) | null
+  onclose: (() => void) | null
+  send(data: string): void
+  close(): void
 }
 
 export type FlashClientOptions = {
@@ -120,6 +131,93 @@ export class FlashClient implements FlashApi {
       'GET',
       `/orders/${encodeURIComponent(orderId)}?${params}`,
     )
+  }
+
+  /**
+   * Open a Quotes WebSocket session for a market order: resolves once the first quote arrives and
+   * keeps collecting revisions until `close()`. Throws FlashApiError if the stream is unavailable,
+   * so callers can fall back to `quote`. Docs: flash.definitive.fi/docs/api-reference/flash/websocket-quotes
+   */
+  openQuoteStream(req: QuoteRequest): Promise<QuoteStream> {
+    const { baseUrl, apiKey, timeoutMs } = this.#opts
+    const WS = (globalThis as unknown as { WebSocket?: new (url: string) => Socket }).WebSocket
+    if (!WS) throw new FlashApiError(0, 'NO_WEBSOCKET', 'this runtime has no WebSocket')
+    const subscriptionId = `q-${Math.random().toString(36).slice(2)}-${Date.now()}`
+    return new Promise((resolve, reject) => {
+      const ws = new WS(`${baseUrl.replace(/^http/, 'ws')}/ws`)
+      let first: QuoteResponse | undefined
+      let latest: QuoteResponse | undefined
+      let revisions = 0
+      let ended = false
+      let settled = false
+      const fail = (err: FlashApiError) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        ws.close()
+        reject(err)
+      }
+      const timer = setTimeout(
+        () => fail(new FlashApiError(0, 'STREAM_TIMEOUT', 'no quote from the stream')),
+        timeoutMs,
+      )
+      ws.onopen = () =>
+        ws.send(
+          JSON.stringify({
+            channel: 'quotes',
+            type: 'subscribe',
+            subscriptionId,
+            apiKey,
+            request: req,
+          }),
+        )
+      ws.onmessage = (ev) => {
+        const m = safeJson(String(ev.data)) as
+          | {
+              type?: string
+              channel?: string
+              code?: string
+              message?: string
+              subscriptionId?: string
+              quote?: QuoteResponse
+            }
+          | undefined
+        if (!m) return
+        if (m.type === 'error' && (!m.subscriptionId || m.subscriptionId === subscriptionId)) {
+          return fail(new FlashApiError(0, m.code ?? 'STREAM_ERROR', m.message ?? 'stream error'))
+        }
+        if (m.channel !== 'quotes' || m.subscriptionId !== subscriptionId) return
+        if (m.type === 'quote_expired') ended = true
+        if (m.type !== 'quote' || !m.quote) return
+        latest = m.quote
+        revisions++
+        if (!first) {
+          first = m.quote
+          settled = true
+          clearTimeout(timer)
+          resolve({
+            first,
+            latest: () => latest!,
+            revisions: () => revisions,
+            close: () => {
+              if (!ended) {
+                ended = true
+                try {
+                  ws.send(
+                    JSON.stringify({ channel: 'quotes', type: 'unsubscribe', subscriptionId }),
+                  )
+                } catch {
+                  // the socket may already be gone
+                }
+              }
+              ws.close()
+            },
+          })
+        }
+      }
+      ws.onerror = () => fail(new FlashApiError(0, 'STREAM_ERROR', 'websocket error'))
+      ws.onclose = () => fail(new FlashApiError(0, 'STREAM_CLOSED', 'websocket closed'))
+    })
   }
 
   async cancelOrder(orderId: string, userSignature: string) {

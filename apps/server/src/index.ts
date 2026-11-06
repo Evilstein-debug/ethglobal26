@@ -63,7 +63,11 @@ function humanVerifier(): HumanVerifier {
 }
 
 function flashSetup(): FlashSetup | undefined {
-  const timing = { pollMs: env.isLocal ? 100 : 1500, fillTimeoutMs: env.isLocal ? 10_000 : 90_000 }
+  const timing = {
+    pollMs: env.isLocal ? 100 : 1500,
+    fillTimeoutMs: env.isLocal ? 10_000 : 90_000,
+    quoteWindowMs: env.flash.quoteWindowMs,
+  }
   if (env.flash.apiKey) {
     if (!env.flash.approvalSpenders.length || !env.flash.typedDataContracts.length) {
       console.warn(
@@ -94,6 +98,7 @@ function flashSetup(): FlashSetup | undefined {
     usdc: contracts.usdc,
     weth: contracts.weth!,
     priceUsd: 3000,
+    minTwapSeconds: env.twap.minSeconds,
   })
   console.warn('[server] Flash: LOCAL STUB (no real orders; fills are fake)')
   return {
@@ -217,6 +222,18 @@ const ctx: AppContext = {
     minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct,
     tradeCooldownMs: env.markets.cooldownMs,
     maxSteps: env.markets.maxSteps,
+    twap: {
+      ...DEFAULT_BRAIN.twap,
+      minSeconds: env.twap.minSeconds,
+      maxSeconds: Math.max(env.twap.minSeconds, env.twap.maxSeconds),
+      minVoters: env.twap.minVoters,
+      trimAtOrBelowBps: env.twap.trimAtOrBelowBps,
+    },
+    limit: {
+      ...DEFAULT_BRAIN.limit,
+      minWaitSeconds: env.limit.minWaitSeconds,
+      maxWaitSeconds: Math.max(env.limit.minWaitSeconds, env.limit.maxWaitSeconds),
+    },
   },
   now: Date.now,
 }

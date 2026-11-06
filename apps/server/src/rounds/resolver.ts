@@ -8,6 +8,7 @@
  * Then Arena.resolveEntry, Brier scores for every prediction, and agent_stats.
  */
 import { canonicalHash } from '@starter/shared/canonical'
+import { FUNDS_DRAINED_NOTE } from '@starter/shared/verify'
 import { and, eq, sql } from 'drizzle-orm'
 import type { Hash } from 'viem'
 import type { AppContext } from '../context'
@@ -47,10 +48,17 @@ export async function computeEntryOutcome(
     .from(schema.intents)
     .where(eq(schema.intents.entryId, entry.id))
   const unsettled = intents.filter((i) =>
-    ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED'].includes(i.state),
+    ['DRAFT', 'COMMITTED', 'EXECUTING', 'RESTING', 'EXECUTED'].includes(i.state),
   )
-  if (unsettled.length)
-    return { outcome: 'VOID' as const, pnlBps: 0, voidReason: 'unsettled_intent' }
+  if (unsettled.length) {
+    // Flash ended an order itself because the funds left the wallet: say that, not "unsettled".
+    const drained = unsettled.some((i) => i.flashNote === FUNDS_DRAINED_NOTE)
+    return {
+      outcome: 'VOID' as const,
+      pnlBps: 0,
+      voidReason: drained ? 'funds_withdrawn' : 'unsettled_intent',
+    }
+  }
   const closed = intents.filter(
     (i) => i.state === 'CLOSED' && i.usdcSpent != null && i.usdcReceived != null,
   )

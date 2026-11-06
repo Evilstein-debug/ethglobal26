@@ -192,6 +192,7 @@ async function openPosition(ctx: AppContext, agentId: string) {
 }
 
 const REFUSED: Record<string, string> = {
+  asset_risk_flagged: 'Flash flags WETH as risky right now, so it is not trading',
   position_open: 'Already holding a position',
   cooldown: 'Cooling down after its last trade',
   over_daily_cap: 'Reached its daily spending limit',
@@ -251,7 +252,9 @@ export async function think(
   )
   const asset = trader && ctx.flash ? await ctx.flash.api.search('WETH', ctx.flash.chain, 1) : []
   const livePrice = Number(asset[0]?.price)
-  const canTrade = Boolean(gate?.ok) && maxSize >= b.minTrade && livePrice > 0
+  // The risk flag is checked again by code at execution; asking here saves a pointless model call.
+  const flagged = Boolean(asset[0]?.riskFlagged)
+  const canTrade = Boolean(gate?.ok) && maxSize >= b.minTrade && livePrice > 0 && !flagged
 
   const [made] = await queryRows<{ n: string }>(
     ctx.db,
@@ -276,6 +279,7 @@ export async function think(
     }
     if (trader && maxSize < b.minTrade) return stop('idle', REFUSED.over_daily_cap!)
     if (reason === 'paused') return stop('idle', REFUSED.paused!)
+    if (trader && flagged) return stop('idle', REFUSED.asset_risk_flagged!)
     return stop('idle', 'No open markets to predict on')
   }
 
@@ -285,6 +289,11 @@ export async function think(
   ].filter(Boolean)
   await setStatus(ctx, agent.id, 'thinking', `Considering ${options.join(' and ')}`)
 
+  // A TWAP must finish well inside the hold limit, or it would still be buying when time is up.
+  const twapLimits = {
+    ...b.twap,
+    maxSeconds: Math.min(b.twap.maxSeconds, Math.floor(cfg.maxHoldMs / 2000)),
+  }
   const data = {
     you: {
       mode: agent.mode,
@@ -306,6 +315,20 @@ export async function think(
       minRewardRisk: b.minRewardRisk,
       maxHoldMinutes: cfg.maxHoldMs / 60_000,
       maxPredictions,
+      limit: {
+        minDipPct: b.limit.minDipPct * 100,
+        maxDipPct: b.limit.maxDipPct * 100,
+        minWaitMinutes: b.limit.minWaitSeconds / 60,
+        maxWaitMinutes: b.limit.maxWaitSeconds / 60,
+      },
+      twap: {
+        minMinutes: twapLimits.minSeconds / 60,
+        maxMinutes: twapLimits.maxSeconds / 60,
+        minBuckets: twapLimits.minBuckets,
+        maxBuckets: twapLimits.maxBuckets,
+        minSliceUsdc: twapLimits.minSlice / 1e6,
+        trimAtOrBelowPct: twapLimits.trimAtOrBelowBps / 100,
+      },
     },
     openMarkets: markets.map((m) => m.view),
   }
@@ -378,7 +401,7 @@ export async function think(
   }
 
   const v = validateThink(res.parsed, {
-    trade: canTrade ? { livePrice, maxSize, ...b } : null,
+    trade: canTrade ? { livePrice, maxSize, ...b, twap: twapLimits } : null,
     predict: canPredict
       ? { offered: new Set(markets.map((m) => m.view.entryId)), maxCount: maxPredictions }
       : null,
@@ -446,7 +469,7 @@ export async function think(
     ctx,
     agent.id,
     'trading',
-    `Buying ${v.sizeQuote} USDC of WETH, target ${v.targetPrice}, stop ${v.stopPrice}`,
+    `${v.execution?.style === 'limit' ? `Placing a limit buy at ${v.execution.limitPrice} (market ${v.entryRefPrice}) of ${v.sizeQuote} USDC of WETH` : `Buying ${v.sizeQuote} USDC of WETH${v.execution?.style === 'twap' ? ` in ${v.execution.buckets} tranches over ${Math.round(v.execution.durationSeconds / 60)} min` : ''}`}, target ${v.targetPrice}, stop ${v.stopPrice}`,
     { rationale: v.rationale, decisionId },
   )
   const trade = await executeTrade(
@@ -465,6 +488,7 @@ export async function think(
       targetPrice: v.targetPrice,
       rationale: v.rationale,
       zeroG: { requestId: res.result.requestId, model: res.result.model },
+      ...(v.execution ? { execution: v.execution } : {}),
       createdAt: new Date(ctx.now()).toISOString(),
     },
     { decisionId },
@@ -472,6 +496,15 @@ export async function think(
   if (trade.status === 'executed') {
     // The market loop broadcasts it: there's one place that opens markets, so no double opens.
     await setStatus(ctx, agent.id, 'watching_position', 'Watching its open position', next)
+  } else if (trade.status === 'resting') {
+    // Nothing is announced until the order fills; the market loop opens it then.
+    await setStatus(
+      ctx,
+      agent.id,
+      'watching_position',
+      `Waiting for its limit buy to fill at ${trade.limitPrice}`,
+      next,
+    )
   } else {
     await settleEmptyMarket(ctx, market.id)
     const why = trade.status === 'denied' ? trade.reason : `${trade.reason} (recorded onchain)`

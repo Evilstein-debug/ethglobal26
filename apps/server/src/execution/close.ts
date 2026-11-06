@@ -13,6 +13,7 @@ import type { AppContext } from '../context'
 import { schema } from '../db'
 import { agentSigner, balancesOf, getAgent } from '../services/agents'
 import { waitForTerminal } from './trade'
+import { noteFlashCancel, stopTwap } from './twap'
 
 export type CloseResult =
   | {
@@ -37,9 +38,21 @@ async function finish(
 ): Promise<CloseResult> {
   const exitFillTx = order.fills.find((f) => isHex(f.transactionId))?.transactionId ?? ''
   const usdcReceived = toUsdc(order.order.filled?.contraAmount ?? '0')
+  // A TWAP buys over time, so what it cost is whatever its tranches filled, known only now.
+  const [row] = await ctx.db
+    .select()
+    .from(schema.intents)
+    .where(eq(schema.intents.intentId, intentId))
+  let cost: { usdcSpent?: number } = {}
+  if (row?.entryStyle === 'twap' && row.flashOrderId && ctx.flash) {
+    const agent = await getAgent(ctx, row.agentId)
+    const entry = await ctx.flash.api.getOrder(row.flashOrderId, getAddress(agent.address))
+    cost = { usdcSpent: toUsdc(entry.order.filled?.contraAmount ?? '0') }
+  }
   await ctx.db
     .update(schema.intents)
     .set({
+      ...cost,
       state: 'CLOSED',
       usdcReceived,
       exitFillTx,
@@ -83,9 +96,10 @@ export async function syncExit(ctx: AppContext, intentId: string): Promise<Close
   if (!flash || intent?.state !== 'EXECUTED' || !intent.flashBracketOrderId) return null
   const agent = await getAgent(ctx, intent.agentId)
   const bracket = await flash.api.getOrder(intent.flashBracketOrderId, getAddress(agent.address))
-  return bracket.order.status === 'ORDER_STATUS_FILLED'
-    ? finish(ctx, intentId, 'bracket', bracket)
-    : null
+  await noteFlashCancel(ctx, intent, bracket)
+  if (bracket.order.status !== 'ORDER_STATUS_FILLED') return null
+  await stopTwap(ctx, intent) // a leg fired: no more tranches
+  return finish(ctx, intentId, 'bracket', bracket)
 }
 
 export async function closePosition(ctx: AppContext, intentId: string): Promise<CloseResult> {
@@ -107,11 +121,13 @@ export async function closePosition(ctx: AppContext, intentId: string): Promise<
     finish(ctx, intentId, via, order, closeOrderId)
 
   try {
+    await stopTwap(ctx, intent) // tranches still to come would change the cost after we sell
     const entry = await flash.api.getOrder(intent.flashOrderId, funder)
     const bought = entry.order.filled?.targetAmount ?? '0'
 
     if (intent.flashBracketOrderId) {
       const bracket = await flash.api.getOrder(intent.flashBracketOrderId, funder)
+      await noteFlashCancel(ctx, intent, bracket)
       if (bracket.order.status === 'ORDER_STATUS_FILLED') return done('bracket', bracket)
       if (
         ['ORDER_STATUS_ACCEPTED', 'ORDER_STATUS_PENDING', 'ORDER_STATUS_PARTIALLY_FILLED'].includes(

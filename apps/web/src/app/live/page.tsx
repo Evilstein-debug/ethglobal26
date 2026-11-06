@@ -52,6 +52,8 @@ const STATE_LABEL: Record<string, string> = {
   thought: 'Thought',
   tool_call: 'Tool call',
   tool_result: 'Tool result',
+  twap: 'TWAP',
+  flash: 'Flash',
 }
 const BUSY = ['reading_news', 'thinking', 'trading', 'predicting']
 /** The agent's reasoning steps within one thought: drawn indented under the thought they belong to. */

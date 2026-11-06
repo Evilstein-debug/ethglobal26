@@ -110,7 +110,7 @@ export async function authorizeTrade(
       .where(
         and(
           eq(schema.intents.agentId, req.agentId),
-          inArray(schema.intents.state, ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED']),
+          inArray(schema.intents.state, ['DRAFT', 'COMMITTED', 'EXECUTING', 'RESTING', 'EXECUTED']),
         ),
       )
     if (Number(sums?.open ?? 0) > 0 || (live?.n ?? 0) > 0) return deny('position_open')

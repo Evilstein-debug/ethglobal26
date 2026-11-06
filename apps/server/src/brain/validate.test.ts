@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { DEFAULT_BRAIN } from '../context'
 import {
   parseModelJson,
   validatePredictions,
@@ -17,6 +18,8 @@ const limits: TradeLimits = {
   minTpPct: 0.008,
   maxTpPct: 0.1,
   minRewardRisk: 1,
+  twap: DEFAULT_BRAIN.twap,
+  limit: DEFAULT_BRAIN.limit,
 }
 const buy = (o: Record<string, unknown> = {}) => ({
   action: 'buy',
@@ -192,4 +195,90 @@ test('predictions: only offered entries, consistent probabilities, limit and ded
     ok: false,
     reason: 'invalid_schema',
   })
+})
+
+test('trade: a TWAP entry is accepted only inside the configured schedule', () => {
+  const twap = (o: Record<string, unknown> = {}) =>
+    buy({ style: 'twap', durationMinutes: 5, buckets: 3, ...o })
+  const ok = validateTrade(twap(), limits)
+  assert.ok(ok.ok && ok.action === 'buy')
+  assert.deepEqual(ok.ok && ok.action === 'buy' && ok.execution, {
+    style: 'twap',
+    durationSeconds: 300,
+    buckets: 3,
+  })
+  // Plain buys carry no execution plan.
+  const plain = validateTrade(buy(), limits)
+  assert.ok(plain.ok && plain.action === 'buy' && plain.execution === undefined)
+  assert.deepEqual(validateTrade(twap({ durationMinutes: 1 }), limits), {
+    ok: false,
+    reason: 'twap_duration_out_of_range',
+  })
+  assert.deepEqual(validateTrade(twap({ durationMinutes: 600 }), limits), {
+    ok: false,
+    reason: 'twap_duration_out_of_range',
+  })
+  assert.deepEqual(validateTrade(twap({ durationMinutes: undefined }), limits), {
+    ok: false,
+    reason: 'twap_duration_out_of_range',
+  })
+  assert.deepEqual(validateTrade(twap({ buckets: 1 }), limits), {
+    ok: false,
+    reason: 'twap_buckets_out_of_range',
+  })
+  assert.deepEqual(validateTrade(twap({ buckets: 2.5 }), limits), {
+    ok: false,
+    reason: 'twap_buckets_out_of_range',
+  })
+  // 5 USDC over 6 tranches is under the 0.5 USDC minimum tranche once the size is clamped down.
+  assert.deepEqual(validateTrade(twap({ buckets: 6, sizeQuote: 2 }), limits), {
+    ok: false,
+    reason: 'twap_slice_too_small',
+  })
+  assert.deepEqual(validateTrade(buy({ style: 'iceberg' }), limits), {
+    ok: false,
+    reason: 'unknown_entry_style',
+  })
+})
+
+test('trade: a limit entry sits a bounded distance below the market, with the bracket measured from it', () => {
+  // Live price 3000; limit 2970 is a 1% dip; stop and target are around the limit, not the market.
+  const limit = (o: Record<string, unknown> = {}) =>
+    buy({
+      style: 'limit',
+      limitPrice: 2970,
+      waitMinutes: 10,
+      stopPrice: 2925,
+      targetPrice: 3030,
+      ...o,
+    })
+  const ok = validateTrade(limit(), limits)
+  assert.ok(ok.ok && ok.action === 'buy')
+  assert.deepEqual(ok.ok && ok.action === 'buy' && ok.execution, {
+    style: 'limit',
+    limitPrice: '2970.00',
+    expireSeconds: 600,
+  })
+  assert.equal(ok.ok && ok.action === 'buy' && ok.entryRefPrice, '3000.00', 'still the live price')
+  const reject = (o: Record<string, unknown>) => {
+    const r = validateTrade(limit(o), limits)
+    return r.ok ? 'accepted' : r.reason
+  }
+  assert.equal(reject({ limitPrice: 3000 }), 'limit_out_of_range', 'not below the market')
+  assert.equal(reject({ limitPrice: 3100 }), 'limit_out_of_range')
+  assert.equal(reject({ limitPrice: 2999.9 }), 'limit_out_of_range', 'too shallow to mean anything')
+  assert.equal(reject({ limitPrice: 2700 }), 'limit_out_of_range', 'too deep to ever fill')
+  assert.equal(reject({ limitPrice: undefined }), 'limit_price_missing')
+  assert.equal(reject({ waitMinutes: 1 }), 'limit_wait_out_of_range')
+  assert.equal(reject({ waitMinutes: 600 }), 'limit_wait_out_of_range')
+  assert.equal(reject({ waitMinutes: undefined }), 'limit_wait_out_of_range')
+  assert.equal(reject({ stopPrice: 2975 }), 'prices_not_bracketing_entry', 'stop above the limit')
+  assert.equal(
+    reject({ targetPrice: 2960 }),
+    'prices_not_bracketing_entry',
+    'target below the limit',
+  )
+  // Risk is measured from the limit: a stop 1.5% under it is fine, 0.1% is too tight.
+  assert.equal(reject({ stopPrice: 2967 }), 'stop_out_of_range')
+  assert.equal(reject({ style: 'iceberg' }), 'unknown_entry_style')
 })
