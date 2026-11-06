@@ -120,7 +120,16 @@ export async function deployLocal() {
       '--private-key',
       anvilAccount(0).privateKey,
     ],
-    { cwd: resolve(ROOT, 'packages/contracts') },
+    {
+      cwd: resolve(ROOT, 'packages/contracts'),
+      // Forge also loads packages/contracts/.env, which may hold Base settings. Existing env vars
+      // win over it, so a local deploy always makes the anvil dev account the operator.
+      env: {
+        OPERATOR_ADDRESS: anvilAccount(0).account.address,
+        ARENA_OWNER: anvilAccount(0).account.address,
+        EPOCH_CAP: '5000000',
+      },
+    },
   )
   await run('pnpm', ['codegen'])
 }
