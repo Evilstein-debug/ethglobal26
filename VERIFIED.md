@@ -128,7 +128,7 @@ Exact versions, from `npm view <pkg> version` unless noted.
 
 ## Not verified
 
-- **Deploying and verifying on Base end to end:** not run yet (Phase 1 deploys). `foundry.toml` uses Etherscan API V2 with `chain = 8453`.
+- **Deploying and verifying on Base:** done 2026-11-07 (Arena `0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2`, TradeLog `0x82791F6a15791d03aE1483c5676cDcD712A59616`, start block 54013558, `epochCap` 100000). A real Flash trade through them is still unproven. `foundry.toml` uses Etherscan API V2 with `chain = 8453`.
 - **Flash orders:** documented above from the official docs, not yet exercised with real orders.
 - **Foundry's default verifier:** the docs disagree (Sourcify vs Etherscan depending on version and whether a key is set). Always pass `--verifier` explicitly.
 - **WalletConnect:** the injected-wallet fallback is what was run. The `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` path (RainbowKit `getDefaultConfig`) typechecks but was not exercised with a real project ID. Project IDs come from https://dashboard.reown.com.

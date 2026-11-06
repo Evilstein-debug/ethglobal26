@@ -193,8 +193,8 @@ become realized losses.
 
 | Contract | Base mainnet                                 |
 | -------- | -------------------------------------------- |
-| TradeLog | _TODO(team): after deploy_                   |
-| Arena    | _TODO(team): after deploy_                   |
+| TradeLog | `0x82791F6a15791d03aE1483c5676cDcD712A59616` |
+| Arena    | `0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2` |
 | USDC     | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 
 ## Trust assumptions

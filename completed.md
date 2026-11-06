@@ -126,8 +126,8 @@ These could only be checked up to the point real services are needed:
 3. **World:** a World ID 4.0 app (`app_id`, `rp_id`, signing key). Test with the simulator, and fill
    in the TODOs in `WORLD_FEEDBACK.md`.
 4. **Neon:** a database and its `DATABASE_URL`.
-5. **Deploy** contracts, server and web, and fund the pool: README "Deploy".
-6. **README TODOs:** team names and contacts, live link, video link, contract addresses.
+5. **Deploy** server and web, and fund the pool: README "Deploy". Contracts are on Base (2026-11-07).
+6. **README TODOs:** team names and contacts, live link, video link.
 7. **Demo:** a video under 3 minutes, and a clip on Discord and X tagging @DefinitiveFi.
 8. **Decisions:** Continuity status, whether to send Flash's agent intent reports, and the mentor
    questions in CLAUDE.md §9.

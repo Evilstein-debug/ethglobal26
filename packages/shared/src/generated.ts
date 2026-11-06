@@ -3,7 +3,8 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2)
+ * -
  */
 export const arenaAbi = [
   {
@@ -571,14 +572,17 @@ export const arenaAbi = [
 ] as const
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2)
+ * -
  */
 export const arenaAddress = {
+  8453: '0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2',
   31337: '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9',
 } as const
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0xBbDDB3fD6D5d62d260cdbf4678cfDE97fB8F9AF2)
+ * -
  */
 export const arenaConfig = { address: arenaAddress, abi: arenaAbi } as const
 
@@ -921,7 +925,8 @@ export const mockWethConfig = { address: mockWethAddress, abi: mockWethAbi } as 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0x82791F6a15791d03aE1483c5676cDcD712A59616)
+ * -
  */
 export const tradeLogAbi = [
   {
@@ -1026,13 +1031,16 @@ export const tradeLogAbi = [
 ] as const
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0x82791F6a15791d03aE1483c5676cDcD712A59616)
+ * -
  */
 export const tradeLogAddress = {
+  8453: '0x82791F6a15791d03aE1483c5676cDcD712A59616',
   31337: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
 } as const
 
 /**
- *
+ * - [__View Contract on Base Basescan__](https://basescan.org/address/0x82791F6a15791d03aE1483c5676cDcD712A59616)
+ * -
  */
 export const tradeLogConfig = { address: tradeLogAddress, abi: tradeLogAbi } as const
