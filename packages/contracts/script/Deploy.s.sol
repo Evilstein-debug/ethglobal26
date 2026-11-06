@@ -14,6 +14,7 @@ import {MockWETH} from "../src/mocks/MockWETH.sol";
 /// @dev    The signer comes from the CLI (`--private-key` or `--account`), never from code.
 ///         Env (all optional on anvil):
 ///           USDC_ADDRESS     required off anvil; Circle's USDC (see VERIFIED.md)
+///           (ignored on anvil, where the deployer is owner and operator)
 ///           ARENA_OWNER      admin (Ownable2Step); default: the deployer
 ///           OPERATOR_ADDRESS server wallet that opens/locks/resolves/publishes; default: deployer
 ///           EPOCH_CAP        max USDC base units per reward epoch; default 5e6 (5 USDC)
@@ -24,9 +25,12 @@ contract Deploy is Script {
         uint256 startBlock = block.number;
         string memory key = "deployment";
         address deployer = msg.sender;
-        address owner = vm.envOr("ARENA_OWNER", deployer);
-        address operator = vm.envOr("OPERATOR_ADDRESS", deployer);
-        uint256 epochCap = vm.envOr("EPOCH_CAP", uint256(5e6));
+        // On anvil, ignore Base settings from packages/contracts/.env (forge loads it automatically):
+        // the local server signs as the deployer (anvil dev account #0), so it must be the operator.
+        bool local = block.chainid == ANVIL_CHAIN_ID;
+        address owner = local ? deployer : vm.envOr("ARENA_OWNER", deployer);
+        address operator = local ? deployer : vm.envOr("OPERATOR_ADDRESS", deployer);
+        uint256 epochCap = local ? 5e6 : vm.envOr("EPOCH_CAP", uint256(5e6));
 
         vm.startBroadcast();
         address usdc;
