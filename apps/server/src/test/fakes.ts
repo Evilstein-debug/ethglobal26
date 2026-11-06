@@ -65,6 +65,7 @@ export async function startApi(db: Db, overrides: Partial<AppContext> = {}) {
     humanVerifier: devHumanVerifier,
     allowManualTrades: true,
     brain: DEFAULT_BRAIN,
+    readNews: async () => ({ label: 'test', items: [] }),
     now: Date.now,
     ...overrides,
   }

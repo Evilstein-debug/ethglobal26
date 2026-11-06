@@ -1,5 +1,6 @@
 import type { FlashApi, FlashChain, LocalFlashStub } from '@starter/flash'
 import type { LLMClient } from '@starter/zerog'
+import type { News } from './brain/news'
 import type { MarketConfig } from './rounds/scheduler'
 import type { Address, Chain, PublicClient } from 'viem'
 import type { HumanVerifier } from './auth/human'
@@ -25,6 +26,8 @@ export type AppContext = {
   /** The agents' brain: 0G in production; a labeled local stub only on anvil. */
   llm?: LLMClient
   brain: BrainConfig
+  /** What agents read before deciding. Untrusted data. */
+  readNews: () => Promise<News>
   /** Market timing and reward settings (scheduler). */
   markets?: MarketConfig
   /** Public World ID settings for the browser (IDKit) + server-side RP signing. */

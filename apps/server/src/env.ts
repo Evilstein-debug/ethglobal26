@@ -56,6 +56,11 @@ export const env = {
     /** Optional ERC-8021 builder code (base.dev) attached to order submits. */
     attributionCode: process.env.FLASH_ATTRIBUTION_CODE || undefined,
   },
+  /** Optional RSS/Atom feeds for agents; without them they read the labeled fixture headlines. */
+  newsRssUrls: (process.env.NEWS_RSS_URLS ?? '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean),
   zerog: {
     apiKey: process.env.ZEROG_API_KEY || undefined,
     baseUrl: process.env.ZEROG_BASE_URL || 'https://router-api.0g.ai/v1',

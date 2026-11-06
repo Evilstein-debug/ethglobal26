@@ -18,6 +18,7 @@ import { createArenaOps } from './chain/operator'
 import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from './context'
 import { ZeroGClient, type LLMClient } from '@starter/zerog'
 import { localModel } from './brain/local-model'
+import { newsReader } from './brain/news'
 import { openDb } from './db'
 import { env } from './env'
 import { startPredictionIndexer } from './rounds/indexer'
@@ -177,6 +178,7 @@ const ctx: AppContext = {
   },
   devTools: env.isLocal,
   devFaucet: env.isLocal ? localFaucet() : undefined,
+  readNews: newsReader(env.newsRssUrls),
   brain: {
     ...DEFAULT_BRAIN,
     minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct,

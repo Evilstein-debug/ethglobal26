@@ -23,6 +23,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
 import { devHumanVerifier, humanIdOf } from '../auth/human'
+import { newsReader } from '../brain/news'
 import { createArenaOps } from '../chain/operator'
 import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from '../context'
 import { freshDb, schema } from '../db/testing'
@@ -133,6 +134,7 @@ export async function startAnvilWorld() {
     flash,
     allowManualTrades: true,
     brain: DEFAULT_BRAIN,
+    readNews: newsReader([]),
     now: Date.now,
   }
 

@@ -5,8 +5,6 @@
  * on offer and enforces the limits. Every step lands in the agent's public activity feed.
  */
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { ZeroGError, type LLMResult } from '@starter/zerog'
 import { canonicalJson, idHash } from '@starter/shared/canonical'
 import { arenaAbi } from '@starter/shared/generated'
@@ -26,12 +24,6 @@ import { parseModelJson, validateThink, type PredictionDecision } from './valida
 type AgentRow = typeof schema.agents.$inferSelect
 type Kind = 'think' | 'trade' | 'prediction'
 const DAY_MS = 86_400_000
-
-const HEADLINES = JSON.parse(
-  readFileSync(resolve(import.meta.dirname, '../../fixtures/headlines.json'), 'utf8'),
-) as { label: string; items: string[] }
-
-const readNews = async () => HEADLINES
 
 async function record(
   ctx: AppContext,
@@ -264,7 +256,7 @@ export async function think(
     return stop('idle', 'No open markets to predict on')
   }
 
-  const news = canTrade ? await readNews() : null
+  const news = canTrade ? await ctx.readNews() : null
   if (news) {
     await setStatus(ctx, agent.id, 'reading_news', `Reading ${news.items.length} headlines`)
   }
