@@ -1,12 +1,13 @@
 import cors from 'cors'
 import express, { type ErrorRequestHandler } from 'express'
 import { chain, publicClient, rpcUrl } from './chain'
+import { sql } from 'drizzle-orm'
 import { openDb } from './db'
 import { env } from './env'
 
 // Anything that must not run in the browser lives here: agent keys, policy engine, 0G and Flash
 // calls, the round scheduler and resolver. Routes are added phase by phase (see CLAUDE.md §8).
-const db = openDb(env.databasePath)
+const { db, kind: dbKind } = await openDb(env.databaseUrl)
 
 const app = express()
 app.disable('x-powered-by')
@@ -15,12 +16,15 @@ app.use(express.json())
 
 app.get('/health', async (_req, res) => {
   const blockNumber = await publicClient.getBlockNumber()
-  const dbOk = db.$client.prepare('SELECT 1 AS ok').get() as { ok: number }
+  const dbOk = await db.execute(sql`select 1`).then(
+    () => true,
+    () => false,
+  )
   res.json({
     ok: true,
     chainId: chain.id,
     blockNumber: blockNumber.toString(),
-    db: dbOk.ok === 1,
+    db: dbOk,
   })
 })
 
@@ -34,6 +38,6 @@ app.use(onError)
 app.listen(env.port, (error) => {
   if (error) throw error
   console.log(
-    `[server] http://localhost:${env.port} · chain ${chain.id} (${chain.name}) · rpc ${rpcUrl} · db ${env.databasePath}`,
+    `[server] http://localhost:${env.port} · chain ${chain.id} (${chain.name}) · rpc ${rpcUrl} · db ${dbKind}`,
   )
 })

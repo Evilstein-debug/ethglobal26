@@ -31,8 +31,5 @@ cache/
 .DS_Store
 .idea/
 
-# server database (SQLite)
+# server database (local PGlite data)
 apps/server/data/
-*.db
-*.db-shm
-*.db-wal

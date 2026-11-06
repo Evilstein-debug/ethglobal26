@@ -1,5 +1,6 @@
 /**
- * Server database (SQLite via Drizzle). Conventions:
+ * Server database (Postgres via Drizzle: Neon in production, in-process PGlite locally and in
+ * tests). Conventions:
  * - USDC amounts are integers in base units (6 decimals): `usdc_*` / `*_cap` / `amount`.
  * - Times are unix milliseconds.
  * - Addresses are stored lowercase.
@@ -9,30 +10,34 @@
  */
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
+  boolean,
+  doublePrecision,
   index,
   integer,
+  pgTable,
   primaryKey,
-  real,
-  sqliteTable,
   text,
   uniqueIndex,
-} from 'drizzle-orm/sqlite-core'
+} from 'drizzle-orm/pg-core'
 
-const now = sql`(unixepoch() * 1000)`
-const createdAt = () => integer('created_at').notNull().default(now)
-const updatedAt = () => integer('updated_at').notNull().default(now)
+const now = sql`(extract(epoch from now()) * 1000)::bigint`
+/** Unix ms or USDC base units: bigint columns read back as JS numbers (safe below 2^53). */
+const num = (name: string) => bigint(name, { mode: 'number' })
+const createdAt = () => num('created_at').notNull().default(now)
+const updatedAt = () => num('updated_at').notNull().default(now)
 
 /** One row per World-verified human. Unique nullifier = one human, one account. */
-export const owners = sqliteTable('owners', {
+export const owners = pgTable('owners', {
   wallet: text('wallet').primaryKey(),
   worldNullifierHash: text('world_nullifier_hash').notNull().unique(),
   /** keccak256(nullifier_hash); the id registered in Arena. */
   humanId: text('human_id').notNull().unique(),
-  verifiedAt: integer('verified_at').notNull(),
+  verifiedAt: num('verified_at').notNull(),
   createdAt: createdAt(),
 })
 
-export const agents = sqliteTable(
+export const agents = pgTable(
   'agents',
   {
     id: text('id').primaryKey(),
@@ -54,22 +59,22 @@ export const agents = sqliteTable(
 )
 
 /** Owner-set limits. The model never sets these. */
-export const policies = sqliteTable('policies', {
+export const policies = pgTable('policies', {
   agentId: text('agent_id')
     .primaryKey()
     .references(() => agents.id),
-  perTradeCap: integer('per_trade_cap').notNull(),
-  roundTradeCap: integer('round_trade_cap').notNull(),
-  dailyCap: integer('daily_cap').notNull(),
+  perTradeCap: num('per_trade_cap').notNull(),
+  roundTradeCap: num('round_trade_cap').notNull(),
+  dailyCap: num('daily_cap').notNull(),
   /** JSON array of TradeAsset symbols, e.g. ["WETH"]. */
   tokenAllowlist: text('token_allowlist').notNull().default('["WETH"]'),
   predictionsPerRound: integer('predictions_per_round').notNull().default(10),
-  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  paused: boolean('paused').notNull().default(false),
   updatedAt: updatedAt(),
 })
 
 /** Budget reservations: reserve before signing, settle on fill, release on failure. */
-export const spendLedger = sqliteTable(
+export const spendLedger = pgTable(
   'spend_ledger',
   {
     id: text('id').primaryKey(),
@@ -78,7 +83,7 @@ export const spendLedger = sqliteTable(
       .references(() => agents.id),
     roundId: integer('round_id').notNull(),
     kind: text('kind', { enum: ['trade'] }).notNull(),
-    amount: integer('amount').notNull(),
+    amount: num('amount').notNull(),
     status: text('status', { enum: ['reserved', 'settled', 'released'] }).notNull(),
     /** intents.intent_id this reservation backs. */
     ref: text('ref').notNull(),
@@ -88,22 +93,22 @@ export const spendLedger = sqliteTable(
   (t) => [index('spend_agent_idx').on(t.agentId, t.status)],
 )
 
-export const rounds = sqliteTable('rounds', {
+export const rounds = pgTable('rounds', {
   id: integer('id').primaryKey(),
   phase: text('phase', {
     enum: ['REGISTRATION', 'PREDICTING', 'TRADING', 'RESOLVING', 'SETTLED'],
   }).notNull(),
   epochId: integer('epoch_id').notNull(),
-  startsAt: integer('starts_at').notNull(),
-  phaseEndsAt: integer('phase_ends_at').notNull(),
+  startsAt: num('starts_at').notNull(),
+  phaseEndsAt: num('phase_ends_at').notNull(),
   lockTx: text('lock_tx'),
 })
 
 /** A trader agent opted into a round. Predictions target entries. */
-export const roundEntries = sqliteTable(
+export const roundEntries = pgTable(
   'round_entries',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
     roundId: integer('round_id')
       .notNull()
       .references(() => rounds.id),
@@ -114,7 +119,7 @@ export const roundEntries = sqliteTable(
     /** Policy snapshot taken at REGISTRATION; a mismatch at resolution voids the entry. */
     policySnapshot: text('policy_snapshot').notNull(),
     policySnapshotHash: text('policy_snapshot_hash').notNull(),
-    tradeBudget: integer('trade_budget').notNull(),
+    tradeBudget: num('trade_budget').notNull(),
     outcome: text('outcome', { enum: ['PENDING', 'YES', 'NO', 'VOID'] })
       .notNull()
       .default('PENDING'),
@@ -127,7 +132,7 @@ export const roundEntries = sqliteTable(
   (t) => [uniqueIndex('entries_round_trader_uq').on(t.roundId, t.traderAgentId)],
 )
 
-export const intents = sqliteTable(
+export const intents = pgTable(
   'intents',
   {
     intentId: text('intent_id').primaryKey(),
@@ -143,7 +148,7 @@ export const intents = sqliteTable(
       enum: ['DRAFT', 'COMMITTED', 'EXECUTING', 'EXECUTED', 'CLOSED', 'FAILED'],
     }).notNull(),
     asset: text('asset').notNull(),
-    sizeQuote: integer('size_quote').notNull(),
+    sizeQuote: num('size_quote').notNull(),
     entryRefPrice: text('entry_ref_price').notNull(),
     stopPrice: text('stop_price').notNull(),
     targetPrice: text('target_price').notNull(),
@@ -157,15 +162,15 @@ export const intents = sqliteTable(
     entryFillTx: text('entry_fill_tx'),
     exitFillTx: text('exit_fill_tx'),
     /** Realized amounts from Flash fills, USDC base units. */
-    usdcSpent: integer('usdc_spent'),
-    usdcReceived: integer('usdc_received'),
+    usdcSpent: num('usdc_spent'),
+    usdcReceived: num('usdc_received'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [index('intents_round_agent_idx').on(t.roundId, t.agentId)],
 )
 
-export const predictions = sqliteTable(
+export const predictions = pgTable(
   'predictions',
   {
     predictionId: text('prediction_id').primaryKey(),
@@ -182,14 +187,14 @@ export const predictions = sqliteTable(
     decisionId: text('decision_id').references(() => decisions.id),
     predictTx: text('predict_tx'),
     /** Brier score once the entry resolves (lower is better); null while pending or VOID. */
-    brier: real('brier'),
+    brier: doublePrecision('brier'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('predictions_entry_predictor_uq').on(t.entryId, t.predictorAddress)],
 )
 
 /** Every 0G Router call, accepted or rejected: the audit trail behind each decision. */
-export const decisions = sqliteTable(
+export const decisions = pgTable(
   'decisions',
   {
     id: text('id').primaryKey(),
@@ -205,17 +210,17 @@ export const decisions = sqliteTable(
     provider: text('provider').notNull(),
     /** ZG-Res-Key header; input to independent TEE verification. */
     chatId: text('chat_id'),
-    teeVerified: integer('tee_verified', { mode: 'boolean' }),
+    teeVerified: boolean('tee_verified'),
     rawOutput: text('raw_output').notNull(),
-    accepted: integer('accepted', { mode: 'boolean' }).notNull(),
+    accepted: boolean('accepted').notNull(),
     rejectReason: text('reject_reason'),
-    latencyMs: integer('latency_ms'),
+    latencyMs: num('latency_ms'),
     createdAt: createdAt(),
   },
   (t) => [index('decisions_agent_round_idx').on(t.agentId, t.roundId)],
 )
 
-export const agentStats = sqliteTable(
+export const agentStats = pgTable(
   'agent_stats',
   {
     agentId: text('agent_id')
@@ -227,20 +232,20 @@ export const agentStats = sqliteTable(
     losses: integer('losses').notNull().default(0),
     voids: integer('voids').notNull().default(0),
     pnlBpsTotal: integer('pnl_bps_total').notNull().default(0),
-    brierSum: real('brier_sum').notNull().default(0),
+    brierSum: doublePrecision('brier_sum').notNull().default(0),
     brierCount: integer('brier_count').notNull().default(0),
     /** Rows derived from labeled replay data, never mixed silently with live results. */
-    replay: integer('replay', { mode: 'boolean' }).notNull().default(false),
+    replay: boolean('replay').notNull().default(false),
     updatedAt: updatedAt(),
   },
   (t) => [primaryKey({ columns: [t.agentId, t.role, t.replay] })],
 )
 
-export const rewardEpochs = sqliteTable('reward_epochs', {
+export const rewardEpochs = pgTable('reward_epochs', {
   id: integer('id').primaryKey(),
-  startsAt: integer('starts_at').notNull(),
-  endsAt: integer('ends_at').notNull(),
-  budget: integer('budget').notNull(),
+  startsAt: num('starts_at').notNull(),
+  endsAt: num('ends_at').notNull(),
+  budget: num('budget').notNull(),
   status: text('status', { enum: ['open', 'computed', 'published'] })
     .notNull()
     .default('open'),
@@ -248,10 +253,10 @@ export const rewardEpochs = sqliteTable('reward_epochs', {
 })
 
 /** At most one award per human per epoch (mirrors the onchain rule). */
-export const rewardAwards = sqliteTable(
+export const rewardAwards = pgTable(
   'reward_awards',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
     epochId: integer('epoch_id')
       .notNull()
       .references(() => rewardEpochs.id),
@@ -264,7 +269,7 @@ export const rewardAwards = sqliteTable(
       .references(() => agents.id),
     category: text('category', { enum: ['trader', 'predictor'] }).notNull(),
     rank: integer('rank').notNull(),
-    amount: integer('amount').notNull(),
+    amount: num('amount').notNull(),
     claimTx: text('claim_tx'),
   },
   (t) => [uniqueIndex('awards_epoch_human_uq').on(t.epochId, t.humanId)],

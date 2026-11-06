@@ -10,5 +10,4 @@ overrides:
   '@coinbase/cdp-sdk': 1.52.0
 
 onlyBuiltDependencies:
-  - better-sqlite3
   - esbuild

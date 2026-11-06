@@ -209,7 +209,7 @@ Schema: `predictionSchema` in `packages/shared/src/schemas.ts`.
 
 Trust assumption (state in README): the operator resolves entries from public Flash fills and publishes rewards from public scores; anyone can re-check with `scripts/verify.ts`. A trustless resolver is out of scope.
 
-### 5.4 Database tables (SQLite, Drizzle; `apps/server/src/db/schema.ts`)
+### 5.4 Database tables (Postgres via Drizzle: Neon in production, PGlite locally; `apps/server/src/db/schema.ts`)
 
 USDC amounts are integers in base units (6 decimals); times are unix ms.
 
@@ -242,7 +242,7 @@ USDC amounts are integers in base units (6 decimals); times are unix ms.
 
 ## 7. Layer-by-layer implementation
 
-Stack: TypeScript pnpm monorepo (from the `eth-starter` template), Next.js + wagmi/viem + RainbowKit, Express 5 server + workers, viem for Base, Foundry for contracts, zod, Drizzle + SQLite, `openai` SDK pointed at the 0G Router, World IDKit (current package per World's docs).
+Stack: TypeScript pnpm monorepo (from the `eth-starter` template), Next.js + wagmi/viem + RainbowKit, Express 5 server + workers, viem for Base, Foundry for contracts, zod, Drizzle + Postgres (Neon in production, PGlite locally), `openai` SDK pointed at the 0G Router, World IDKit (current package per World's docs).
 
 ```
 /apps/web             Next.js UI

@@ -6,8 +6,11 @@ export const env = {
   rpcUrl: process.env.RPC_URL || undefined,
   port: Number(process.env.PORT) || 8787,
   corsOrigins: (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map((s) => s.trim()),
-  /** SQLite file. Default: apps/server/data/arena-<chainId>.db (gitignored), one per chain. */
-  databasePath:
-    process.env.DATABASE_PATH ||
-    resolve(import.meta.dirname, `../data/arena-${parseChainId(process.env.CHAIN_ID)}.db`),
+  /**
+   * postgres://… (Neon in production) or a local PGlite directory.
+   * Default: apps/server/data/pglite-<chainId> (gitignored), one database per chain.
+   */
+  databaseUrl:
+    process.env.DATABASE_URL ||
+    resolve(import.meta.dirname, `../data/pglite-${parseChainId(process.env.CHAIN_ID)}`),
 }
