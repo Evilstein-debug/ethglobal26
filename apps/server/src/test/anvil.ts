@@ -21,7 +21,7 @@ import {
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
-import { mockUsdcAbi } from '@starter/shared/generated'
+import { arenaAbi, mockUsdcAbi } from '@starter/shared/generated'
 import { devHumanVerifier, humanIdOf } from '../auth/human'
 import { createArenaOps } from '../chain/operator'
 import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from '../context'
@@ -168,5 +168,47 @@ export async function startAnvilWorld() {
     for (const hash of hashes) await publicClient.waitForTransactionReceipt({ hash })
   }
 
-  return { ctx, db, stub, rpcUrl, publicClient, owner, fund, contracts: ctx.contracts }
+  /** The operator funds the reward pool with freshly minted mUSDC. */
+  async function fundPool(usdcAmount: string) {
+    const amount = parseUnits(usdcAmount, 6)
+    for (const hash of [
+      await deployer.writeContract({
+        address: usdc,
+        abi: mockUsdcAbi,
+        functionName: 'mint',
+        args: [deployer.account.address, amount],
+      }),
+      await deployer.writeContract({
+        address: usdc,
+        abi: mockUsdcAbi,
+        functionName: 'approve',
+        args: [arenaAddress, amount],
+      }),
+      await deployer.writeContract({
+        address: arenaAddress,
+        abi: arenaAbi,
+        functionName: 'fund',
+        args: [amount],
+      }),
+    ]) {
+      await publicClient.waitForTransactionReceipt({ hash })
+    }
+  }
+
+  /** A wallet client for an owner account (e.g. to claim rewards). */
+  const walletFor = (account: ReturnType<typeof privateKeyToAccount>) =>
+    createWalletClient({ account, chain: anvil, transport: http(rpcUrl), pollingInterval: 50 })
+
+  return {
+    ctx,
+    db,
+    stub,
+    rpcUrl,
+    publicClient,
+    owner,
+    fund,
+    fundPool,
+    walletFor,
+    contracts: ctx.contracts,
+  }
 }
