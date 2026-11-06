@@ -11,7 +11,7 @@ import { anvil } from 'viem/chains'
 import { createApp } from '../app'
 import { devHumanVerifier } from '../auth/human'
 import type { ArenaOps } from '../chain/operator'
-import type { AppContext } from '../context'
+import { DEFAULT_BRAIN, type AppContext } from '../context'
 import type { Db } from '../db'
 import { KeyBox } from '../wallets/keybox'
 
@@ -64,6 +64,7 @@ export async function startApi(db: Db, overrides: Partial<AppContext> = {}) {
     keyBox: new KeyBox('cd'.repeat(32)),
     humanVerifier: devHumanVerifier,
     allowManualTrades: true,
+    brain: DEFAULT_BRAIN,
     now: Date.now,
     ...overrides,
   }

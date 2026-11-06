@@ -5,7 +5,9 @@ import { devHumanVerifier, type HumanVerifier } from './auth/human'
 import { chain, pollingInterval, publicClient, rpcUrl } from './chain/client'
 import { contractsOn } from './chain/contracts'
 import { createArenaOps } from './chain/operator'
-import type { AppContext, FlashSetup } from './context'
+import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from './context'
+import { ZeroGClient, type LLMClient } from '@starter/zerog'
+import { localModel } from './brain/local-model'
 import { openDb } from './db'
 import { env } from './env'
 import { KeyBox } from './wallets/keybox'
@@ -68,6 +70,22 @@ function flashSetup(): FlashSetup | undefined {
   }
 }
 
+function llm(): LLMClient | undefined {
+  if (env.zerog.apiKey) {
+    return new ZeroGClient({
+      apiKey: env.zerog.apiKey,
+      baseUrl: env.zerog.baseUrl,
+      model: env.zerog.model,
+    })
+  }
+  if (env.isLocal) {
+    console.warn('[server] 0G: LOCAL STUB model (decisions labeled "local-stub", not 0G)')
+    return localModel()
+  }
+  console.warn('[server] ZEROG_API_KEY not set: agents cannot decide')
+  return undefined
+}
+
 const ctx: AppContext = {
   db,
   chain,
@@ -87,6 +105,8 @@ const ctx: AppContext = {
   humanVerifier: humanVerifier(),
   flash: flashSetup(),
   allowManualTrades: env.allowManualTrades,
+  llm: llm(),
+  brain: { ...DEFAULT_BRAIN, minTpPct: env.zerog.minTpPct ?? DEFAULT_BRAIN.minTpPct },
   now: Date.now,
 }
 

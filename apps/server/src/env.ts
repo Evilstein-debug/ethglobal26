@@ -56,6 +56,14 @@ export const env = {
     /** Optional ERC-8021 builder code (base.dev) attached to order submits. */
     attributionCode: process.env.FLASH_ATTRIBUTION_CODE || undefined,
   },
+  zerog: {
+    apiKey: process.env.ZEROG_API_KEY || undefined,
+    baseUrl: process.env.ZEROG_BASE_URL || 'https://router-api.0g.ai/v1',
+    /** TeeML models only (sealed inference). */
+    model: process.env.ZEROG_MODEL || 'glm-5.3',
+    /** Minimum take-profit distance (fraction); set from measured Flash round-trip fees. */
+    minTpPct: process.env.TRADE_MIN_TP_PCT ? Number(process.env.TRADE_MIN_TP_PCT) : undefined,
+  },
   /**
    * Hand-written trades (no 0G decision) for smoke-testing the Flash pipeline. Default: only on
    * local anvil. Set to "true" on Base for the one-off first-trade check, then turn it off.

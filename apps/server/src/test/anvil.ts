@@ -24,7 +24,7 @@ import { anvil } from 'viem/chains'
 import { mockUsdcAbi } from '@starter/shared/generated'
 import { devHumanVerifier, humanIdOf } from '../auth/human'
 import { createArenaOps } from '../chain/operator'
-import type { AppContext, FlashSetup } from '../context'
+import { DEFAULT_BRAIN, type AppContext, type FlashSetup } from '../context'
 import { freshDb, schema } from '../db/testing'
 import { KeyBox } from '../wallets/keybox'
 
@@ -132,6 +132,7 @@ export async function startAnvilWorld() {
     humanVerifier: devHumanVerifier,
     flash,
     allowManualTrades: true,
+    brain: DEFAULT_BRAIN,
     now: Date.now,
   }
 

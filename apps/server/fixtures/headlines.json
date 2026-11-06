@@ -1,0 +1,10 @@
+{
+  "label": "FIXTURE: sample headlines written for the demo. Not live news, not real events.",
+  "items": [
+    "FIXTURE: ETH funding rates flat across major venues",
+    "FIXTURE: Onchain stablecoin supply on Base ticks higher this week",
+    "FIXTURE: Options market prices modest volatility into the weekend",
+    "FIXTURE: Large ETH transfer to an exchange spotted, intent unknown",
+    "FIXTURE: Gas fees on Base remain low; DEX volume steady"
+  ]
+}
