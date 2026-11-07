@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { useAccount } from 'wagmi'
 import { api, errorText, useHealth } from '@/lib/api'
+import { demoMode } from '@/lib/env'
 
 const LOCAL_CHAIN_ID = 31337
 
@@ -44,7 +45,7 @@ export function DevWalletFunds() {
   const { address } = useAccount()
   const { data: health } = useHealth()
   const { busy, msg, run } = useDevCall()
-  if (!address || health?.chainId !== LOCAL_CHAIN_ID) return null
+  if (demoMode || !address || health?.chainId !== LOCAL_CHAIN_ID) return null
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <DevButton
@@ -70,7 +71,7 @@ const PRICES = [
 export function DevPriceControls() {
   const { data: health } = useHealth()
   const { busy, msg, run } = useDevCall()
-  if (health?.flash !== 'local-stub') return null
+  if (demoMode || health?.flash !== 'local-stub') return null
   if (health.livePrice) {
     return (
       <p className="rounded-lg border border-hairline bg-surface px-4 py-3 text-xs text-mute">

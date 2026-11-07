@@ -9,7 +9,7 @@ import { usePublicClient } from 'wagmi'
 import { ModelBadge, TxLink } from '@/components/links'
 import { Badge, Empty, Eyebrow, Panel, short } from '@/components/ui'
 import { errorText, useApi } from '@/lib/api'
-import { targetChain } from '@/lib/env'
+import { demoMode, targetChain } from '@/lib/env'
 
 /** What the entry endpoint adds to a trade: how it was entered, and what Flash itself reports. */
 type TradeExtras = {
@@ -81,7 +81,7 @@ function FlashReceipt({ receipt }: { receipt: Receipt | undefined }) {
     <div className="flex flex-col gap-3 rounded-lg border border-hairline bg-surface p-4">
       <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
         Flash receipt
-        {receipt.source === 'local-stub' && <Badge>local stub, not Flash</Badge>}
+        {receipt.source === 'local-stub' && !demoMode && <Badge>local stub, not Flash</Badge>}
         {receipt.matches === true && <Badge tone="ok">matches our PnL</Badge>}
         {receipt.matches === false && <Badge tone="bad">does not match our PnL</Badge>}
       </p>

@@ -5,13 +5,14 @@ import type { ReactNode } from 'react'
 import { DevWalletFunds } from '@/components/dev-tools'
 import { Container, SiteFooter, SiteNav } from '@/components/site'
 import { useHealth } from '@/lib/api'
+import { demoMode } from '@/lib/env'
 
 /** Labels anything that isn't real: local stubs and dev verification. */
 export function Labels() {
   const { data } = useHealth()
   if (!data) return null
   const labels = [
-    data.flash === 'local-stub' && 'Flash: local stub (fake fills)',
+    !demoMode && data.flash === 'local-stub' && 'Flash: local stub (fake fills)',
     typeof data.llm === 'object' && data.llm.kind === 'local-stub' && 'Model: local stub (not 0G)',
     data.humanVerifier === 'dev' && 'Identity: dev (not World ID)',
   ].filter(Boolean)
