@@ -1,39 +1,52 @@
 # Render blueprint for apps/server (long-running: scheduler, workers, resolver). The web app goes
 # on Vercel (README "Deploy"). `sync: false` values are entered in the Render dashboard, never here.
+# Every value below matches the Base mainnet run of 2026-11-07; keys are documented in
+# apps/server/.env.example.
 services:
   - type: web
     name: agentarena-server
     runtime: docker
+    # Always on: the free plan sleeps after 15 idle minutes, which stops the agent and market loops.
+    plan: starter
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: false
     envVars:
+      # ── Chain and secrets ──────────────────────────────────────────────────────────────
       - key: CHAIN_ID
         value: '8453'
       - key: CORS_ORIGIN
-        sync: false
+        sync: false # the Vercel URL(s), comma-separated
       - key: RPC_URL
-        sync: false
+        sync: false # a provider URL; the public mainnet.base.org rate-limits
       - key: DATABASE_URL
-        sync: false
+        sync: false # Neon pooled connection string; migrations apply on boot
       - key: MASTER_KEY
-        sync: false
+        sync: false # MUST be the same key that encrypted the existing agent wallets
       - key: OPERATOR_PRIVATE_KEY
-        sync: false
+        sync: false # Arena's operator, 0x3cfe8a927c5a46704Ba4735CdE234C2153464372
+
+      # ── Definitive Flash ───────────────────────────────────────────────────────────────
       - key: FLASH_API_KEY
         sync: false
+      # Base settlement contract for approvals and EIP-712 orders (VERIFIED.md, flash-inspect).
       - key: FLASH_APPROVAL_SPENDERS
-        sync: false
+        value: '0x5d00000873b6BF41539e6f5365B0Ff7d3c368f78'
       - key: FLASH_TYPED_DATA_CONTRACTS
-        sync: false
+        value: '0x5d00000873b6BF41539e6f5365B0Ff7d3c368f78'
+      # 0 = no fee: the field is then omitted, since Flash rejects "0".
       - key: FLASH_INTEGRATOR_FEE_BPS
         value: '0'
+      - key: FLASH_ATTRIBUTION_CODE
+        sync: false # optional Base builder code
+
+      # ── 0G Private Computer ────────────────────────────────────────────────────────────
       - key: ZEROG_API_KEY
         sync: false
       - key: ZEROG_MODEL
         value: glm-5.3
-      - key: TRADE_MIN_TP_PCT
-        sync: false
+
+      # ── World ID ───────────────────────────────────────────────────────────────────────
       - key: HUMAN_VERIFIER
         value: world
       - key: WORLD_APP_ID
@@ -44,5 +57,41 @@ services:
         sync: false
       - key: WORLD_ACTION
         value: agentarena-owner-v1
+      # Existing owners verified on staging. Production derives a different human ID for the same
+      # person, which Arena then refuses to re-register, so only switch with a fresh start.
       - key: WORLD_ENVIRONMENT
-        value: production
+        value: staging
+
+      # ── Agents and markets ─────────────────────────────────────────────────────────────
+      # Without feeds the agents get no headlines (the default is empty).
+      - key: NEWS_RSS_URLS
+        value: https://www.coindesk.com/arc/outboundfeeds/rss/,https://cointelegraph.com/rss,https://decrypt.co/feed
+      - key: PREDICTION_WINDOW_MS
+        value: '120000'
+      # 30 min, so a small move has time to reach the target; 5 min made agents wait.
+      - key: TRADE_MAX_HOLD_MS
+        value: '1800000'
+      - key: TRADE_COOLDOWN_MS
+        value: '120000'
+      # Take-profit floor as a fraction (0.002 = 0.2%); Flash fees measured at ~0 on Base.
+      - key: TRADE_MIN_TP_PCT
+        value: '0.002'
+      - key: TRADE_MIN_USDC
+        value: '0.25'
+      - key: AGENT_MIN_GAS_ETH
+        value: '0.000003'
+      # Hand-written smoke-test trades (labeled `manual`, not 0G). Off for normal operation.
+      - key: ALLOW_MANUAL_TRADES
+        value: 'false'
+
+      # ── Rewards ────────────────────────────────────────────────────────────────────────
+      # MUST be <= Arena's epochCap (100000 = 0.1 USDC onchain); the code default (5 USDC) makes
+      # publishEpoch revert.
+      - key: REWARD_EPOCH_BUDGET
+        value: '100000'
+      - key: REWARD_EPOCH_MS
+        value: '600000'
+      - key: REWARD_MIN_ENTRIES
+        value: '1'
+      - key: REWARD_MIN_PREDICTIONS
+        value: '1'
